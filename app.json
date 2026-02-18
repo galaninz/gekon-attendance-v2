@@ -27,6 +27,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b4722e52-e04f-4270-bf19-769eebc1b9b1"
+      }
+    },
+    "owner": "galanzi"
   }
 }
