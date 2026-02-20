@@ -308,7 +308,7 @@ async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayl
     { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
   );
 
-  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: "base64" });
+  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: FileSystem.EncodingType.Base64 });
   return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
 }
 
