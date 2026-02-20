@@ -17,7 +17,7 @@ import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Localization from "expo-localization";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
