@@ -18,6 +18,8 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We use your location to verify on-site attendance and record check-ins at the correct job location.",
+        "NSCameraUsageDescription": "We need camera access to take attendance photos.",
+        "NSPhotoLibraryUsageDescription": "We need photo library access to select attendance photos.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
