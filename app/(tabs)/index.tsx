@@ -37,6 +37,8 @@ const STORE = {
   deviceId: "deviceId",
   name: "name",
   lang: "lang",
+  cacheSites: "cache_sites",
+  cacheMe: "cache_me",
 };
 
 type Lang = "en" | "es";
@@ -490,14 +492,46 @@ export default function Index() {
         setNameSaved(true);
       }
 
-      await loadSites();
+      // ─── Кэш: показываем мгновенно ───
+      let hasCache = false;
+      try {
+        const [cachedSitesRaw, cachedMeRaw] = await Promise.all([
+          sget(STORE.cacheSites),
+          sget(STORE.cacheMe),
+        ]);
+        if (cachedSitesRaw) {
+          const cached: Site[] = JSON.parse(cachedSitesRaw);
+          if (cached.length) {
+            setSites(cached);
+            if (!siteId && cached[0]?.id) setSiteId(cached[0].id);
+          }
+        }
+        if (cachedMeRaw && savedName) {
+          const cached: MeResponse = JSON.parse(cachedMeRaw);
+          if (cached?.employee) {
+            applyMe(cached);
+            hasCache = true;
+          }
+        }
+      } catch {}
 
+      // Если есть кэш — убираем спиннер сразу, сеть обновит в фоне
+      if (hasCache) setLoading(false);
+
+      // ─── Сеть: обновляем в фоне ───
       if (savedName) {
-        await initOnServer(did, savedName);
-        await loadMe(did);
+        Promise.all([
+          loadSites().catch(() => {}),
+          initOnServer(did, savedName)
+            .then(() => loadMe(did))
+            .catch(() => {}),
+        ]).finally(() => {
+          if (!hasCache) setLoading(false);
+        });
+      } else {
+        loadSites().catch(() => {});
+        setLoading(false);
       }
-
-      setLoading(false);
     })();
   }, []);
 
@@ -539,6 +573,8 @@ export default function Index() {
     if (!data?.ok) throw new Error(data?.error || "Sites load failed");
     setSites(data.sites || []);
     if (!siteId && data.sites?.[0]?.id) setSiteId(data.sites[0].id);
+    // Кэшируем
+    sset(STORE.cacheSites, JSON.stringify(data.sites || [])).catch(() => {});
   }
 
   async function initOnServer(did: string, nm: string) {
@@ -577,6 +613,8 @@ export default function Index() {
     const data: MeResponse = await res.json();
     if (!data?.ok) throw new Error(data?.error || "Me load failed");
     applyMe(data);
+    // Кэшируем
+    sset(STORE.cacheMe, JSON.stringify(data)).catch(() => {});
   }
 
   async function requestLocationOnce(): Promise<Loc> {
