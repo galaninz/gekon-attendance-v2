@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
   Image,
-  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -17,9 +16,9 @@ import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Localization from "expo-localization";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
 const API_URL =
@@ -129,13 +128,10 @@ const STR: Record<Lang, Record<string, string>> = {
     uploaded: "OSHA uploaded. Waiting for admin approval.",
 
     attestTitle: "Daily Safety Attestation",
-    attVideoBtn: "▶  Watch OSHA Safety Video",
-    attRulesBtn: "📋  View OSHA Site Safety Rules",
-    attest1: "I watched the OSHA safety video and/or reviewed the site safety rules before starting work today.",
-    attest2: "I am NOT under the influence of alcohol, drugs, or any substance that impairs my judgment or physical ability.",
-    attest3: "I have inspected my PPE (hard hat, gloves, boots, vest, eye protection) — it is in good condition and I will wear it at all times on site.",
-    attest4: "I have no pre-existing injuries that could be aggravated by today’s work. If I do, I have reported them to my supervisor BEFORE starting.",
-    attest5: "I understand that falsifying this attestation is grounds for immediate termination and may result in forfeiture of workers’ compensation benefits.",
+    attest1: "I completed today’s safety briefing / toolbox talk.",
+    attest2: "I am sober and fit for duty.",
+    attest3: "I have required PPE.",
+    attest4: "I understand the rules and have no claims/complaints at this time.",
     signature: "Signature (type your name)",
     submitAtt: "Submit attestation",
     attDone: "Daily attestation recorded.",
@@ -205,13 +201,10 @@ const STR: Record<Lang, Record<string, string>> = {
     uploaded: "OSHA subido. Esperando aprobación del admin.",
 
     attestTitle: "Declaración diaria de seguridad",
-    attVideoBtn: "▶  Ver Video de Seguridad OSHA",
-    attRulesBtn: "📋  Ver Reglas de Seguridad OSHA",
-    attest1: "Vi el video de seguridad OSHA y/o revisé las reglas del sitio antes de comenzar a trabajar hoy.",
-    attest2: "NO estoy bajo la influencia de alcohol, drogas ni ninguna sustancia que afecte mi juicio o capacidad física.",
-    attest3: "Inspeccioné mi EPP (casco, guantes, botas, chaleco, protección ocular) — está en buen estado y lo usaré en todo momento.",
-    attest4: "No tengo lesiones preexistentes que puedan agravarse con el trabajo de hoy. Si las tengo, las he reportado a mi supervisor ANTES de comenzar.",
-    attest5: "Entiendo que falsificar esta declaración es motivo de despido inmediato y puede resultar en la pérdida de beneficios de compensación laboral.",
+    attest1: "Completé la charla de seguridad de hoy.",
+    attest2: "Estoy sobrio y apto para trabajar.",
+    attest3: "Tengo el EPP requerido.",
+    attest4: "Entiendo las reglas y no tengo reclamos en este momento.",
     signature: "Firma (escribe tu nombre)",
     submitAtt: "Enviar declaración",
     attDone: "Declaración diaria registrada.",
@@ -308,13 +301,16 @@ async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayl
     { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
   );
 
-  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: FileSystem.EncodingType.Base64 });
+  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: "base64" });
   return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
 }
 
 export default function Index() {
+  const insets = useSafeAreaInsets();
+  const topPad = insets.top || (Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0);
+
   const [lang, setLang] = useState<Lang>(sysLangDefault());
-  const t = useCallback((k: string) => STR[lang][k] || STR.en[k] || k, [lang]);
+  const t = (k: string) => STR[lang][k] || STR.en[k] || k;
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -333,7 +329,6 @@ export default function Index() {
   const [att2, setAtt2] = useState(false);
   const [att3, setAtt3] = useState(false);
   const [att4, setAtt4] = useState(false);
-  const [att5, setAtt5] = useState(false);
 
   const [sites, setSites] = useState<Site[]>([]);
   const [siteId, setSiteId] = useState<string>("");
@@ -565,7 +560,7 @@ export default function Index() {
   }
 
   async function submitAttestation() {
-    const allChecked = att1 && att2 && att3 && att4 && att5;
+    const allChecked = att1 && att2 && att3 && att4;
     if (!allChecked) return;
     const sig = attSig.trim();
     if (!sig) return;
@@ -578,7 +573,7 @@ export default function Index() {
         deviceId,
         name: name.trim(),
         signature: sig,
-        statements: { watchedSafetyVideo: att1, notUnderInfluence: att2, ppeInspected: att3, noPreExistingInjuries: att4, understoodConsequences: att5 },
+        statements: { safetyBriefing: att1, soberFitForDuty: att2, ppeReady: att3, noClaims: att4 },
         device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
       };
       const res = await fetch(API_URL, {
@@ -594,7 +589,6 @@ export default function Index() {
       setAtt2(false);
       setAtt3(false);
       setAtt4(false);
-      setAtt5(false);
 
       applyMe(data);
       await loadMe(deviceId);
@@ -746,7 +740,7 @@ export default function Index() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.center, { backgroundColor: "#FFFFFF" }]}>
+      <SafeAreaView style={[styles.center, { paddingTop: topPad }]}>
         <ActivityIndicator />
         <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
       </SafeAreaView>
@@ -755,10 +749,9 @@ export default function Index() {
 
   if (!nameSaved) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
-        <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
+      <SafeAreaView style={{ flex: 1, paddingTop: topPad }}>
         <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
+          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }}>
             <View style={styles.brandHeaderOnboarding}>
               <Image source={LOGO} style={styles.logoBig} resizeMode="contain" />
             </View>
@@ -809,10 +802,9 @@ export default function Index() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
+    <SafeAreaView style={{ flex: 1, paddingTop: topPad }}>
       <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }}>
           <View style={styles.brandHeader}>
             <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
             <View style={{ flex: 1 }}>
@@ -920,51 +912,21 @@ export default function Index() {
           {showAttestBlock ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{t("attestTitle")}</Text>
-
-              {/* Video & Rules links */}
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-                <TouchableOpacity
-                  style={[styles.linkBtn, { flex: 1 }]}
-                  onPress={() => Linking.openURL(
-                    lang === "es"
-                      ? "https://www.osha.gov/vtools/construction"
-                      : "https://www.osha.gov/vtools/construction"
-                  )}
-                >
-                  <Text style={styles.linkBtnText}>{t("attVideoBtn")}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.linkBtn, { flex: 1 }]}
-                  onPress={() => Linking.openURL("https://www.osha.gov/construction")}
-                >
-                  <Text style={styles.linkBtnText}>{t("attRulesBtn")}</Text>
-                </TouchableOpacity>
-              </View>
-
               <CheckRow label={t("attest1")} checked={att1} onToggle={() => setAtt1(!att1)} />
               <CheckRow label={t("attest2")} checked={att2} onToggle={() => setAtt2(!att2)} />
               <CheckRow label={t("attest3")} checked={att3} onToggle={() => setAtt3(!att3)} />
               <CheckRow label={t("attest4")} checked={att4} onToggle={() => setAtt4(!att4)} />
-              <CheckRow label={t("attest5")} checked={att5} onToggle={() => setAtt5(!att5)} />
 
               <Text style={styles.label}>{t("signature")}</Text>
-              <TextInput
-                value={attSig}
-                onChangeText={setAttSig}
-                style={styles.input}
-                placeholder={name}
-                placeholderTextColor="#5B6475"
-                autoCapitalize="words"
-                autoCorrect={false}
-              />
+              <TextInput value={attSig} onChangeText={setAttSig} style={styles.input} placeholder={name} />
 
               <TouchableOpacity
                 style={[
                   styles.primaryBtn,
-                  (!(att1 && att2 && att3 && att4 && att5) || !attSig.trim()) ? { opacity: 0.5 } : null,
+                  (!(att1 && att2 && att3 && att4) || !attSig.trim()) ? { opacity: 0.5 } : null,
                 ]}
                 onPress={submitAttestation}
-                disabled={busy || !(att1 && att2 && att3 && att4 && att5) || !attSig.trim()}
+                disabled={busy || !(att1 && att2 && att3 && att4) || !attSig.trim()}
               >
                 <Text style={styles.primaryBtnText}>{t("submitAtt")}</Text>
               </TouchableOpacity>
@@ -1158,7 +1120,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   brandHeaderOnboarding: { alignItems: "center", marginBottom: 6 },
-  logoBig: { width: 120, height: 84, alignSelf: "center" },
+  logoBig: { width: "100%", height: 84 },
 
   brandHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
   logoSmall: { width: 70, height: 36 },
@@ -1204,20 +1166,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     color: C.text,
     backgroundColor: "#fff",
-    fontSize: 15,
-    minHeight: 44,
   },
 
   langBtn: {
     flex: 1,
     borderWidth: 1,
     borderColor: C.border,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: 12,
     alignItems: "center",
     backgroundColor: "#fff",
-    minHeight: 44,
-    justifyContent: "center",
   },
   langBtnOn: { borderColor: "rgba(45,91,255,0.35)", backgroundColor: "rgba(45,91,255,0.08)" },
   langText: { color: C.navy, fontWeight: "800" },
@@ -1226,11 +1184,9 @@ const styles = StyleSheet.create({
   primaryBtn: {
     marginTop: 12,
     backgroundColor: C.blue,
-    paddingVertical: 13,
+    paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
-    minHeight: 44,
-    justifyContent: "center",
   },
   primaryBtnText: { color: "#fff", fontWeight: "900" },
 
@@ -1324,24 +1280,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)",
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  linkBtn: {
-    borderWidth: 1,
-    borderColor: "rgba(45,91,255,0.3)",
-    backgroundColor: "rgba(45,91,255,0.06)",
-    borderRadius: 10,
-    paddingVertical: 9,
-    paddingHorizontal: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-  },
-  linkBtnText: {
-    color: "#2D5BFF",
-    fontWeight: "800",
-    fontSize: 12,
-    textAlign: "center",
   },
 
   footer: {
