@@ -3,23 +3,25 @@
     "name": "GEKON Attendance 2",
     "slug": "gekon-attendance-v2",
     "version": "1.0.0",
+    "scheme": "gekonattendancev2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "backgroundColor": "#F2F2F7",
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F2F2F7"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "in.zakhargalan.gekonattendancev2",
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We use your location to verify on-site attendance and record check-ins at the correct job location.",
-        "NSCameraUsageDescription": "We need camera access to take attendance photos.",
-        "NSPhotoLibraryUsageDescription": "We need photo library access to select attendance photos.",
+        "NSCameraUsageDescription": "We need camera access to take an OSHA card photo for verification.",
+        "NSPhotoLibraryUsageDescription": "We need photo library access to select an OSHA card photo for verification.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -30,24 +32,30 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "b4722e52-e04f-4270-bf19-769eebc1b9b1"
-      }
-    },
-    "owner": "galanzi",
     "plugins": [
       "expo-router",
       "expo-secure-store",
       "expo-localization",
       [
+        "expo-system-ui",
+        {
+          "backgroundColor": "#F2F2F7"
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "15.1"
+            "deploymentTarget": "16.0"
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b4722e52-e04f-4270-bf19-769eebc1b9b1"
+      }
+    }
   }
 }

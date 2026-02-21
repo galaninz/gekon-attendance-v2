@@ -3,6 +3,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  LogBox,
   Platform,
   ScrollView,
   StatusBar,
@@ -16,10 +17,15 @@ import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Localization from "expo-localization";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+
+LogBox.ignoreLogs([
+  // Если у тебя старая версия и она ругается на MediaTypeOptions — скрываем этот dev-warn.
+  "[expo-image-picker] `ImagePicker.MediaTypeOptions` have been deprecated",
+]);
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbz0fjpzP6KOn_0mPkz5zTJfTQbLmIrY6ZwvhFT4dBP-6t-kJLyM6DO_eneJDYH7a--l3A/exec";
@@ -57,9 +63,6 @@ type MeResponse = {
   openInISO: string;
   currentSiteName?: string;
   error?: string;
-  distanceM?: number;
-  radiusM?: number;
-  inZone?: boolean;
 };
 
 type PhotoPayload = { base64: string; mime: string; previewUri: string };
@@ -69,8 +72,10 @@ const MAX_OUT_PHOTOS = 3;
 const C = {
   navy: "#0B1B3B",
   blue: "#2D5BFF",
-  bg1: "#F7F9FF",
-  bg2: "#FFFFFF",
+  fog: "#F2F2F7",      // цвет шторки iOS
+  bgTop: "#F2F2F7",   // совпадает со шторкой iOS
+  bgMid: "#F5F6FA",
+  bgBot: "#F2F2F7",   // совпадает со шторкой iOS
   text: "#0B1320",
   muted: "#5B6475",
   border: "#E5E8F0",
@@ -81,7 +86,6 @@ const C = {
 
 const STR: Record<Lang, Record<string, string>> = {
   en: {
-    appName: "GEKON Attendance",
     welcome: "Welcome",
     enterOnce: "Enter your name once. Next time we won’t ask.",
     yourName: "Your name",
@@ -90,9 +94,11 @@ const STR: Record<Lang, Record<string, string>> = {
     english: "English",
     spanish: "Español",
 
-    statusReady: "Ready to work",
+    statusReady: "Ready",
     statusBlocked: "Blocked",
     refresh: "Refresh",
+    changeName: "Change name",
+
     site: "Site",
     reloadSites: "Reload sites",
     otherSite: "Other / New site…",
@@ -107,6 +113,7 @@ const STR: Record<Lang, Record<string, string>> = {
     outNote: "What did you do today? (min 2 words)",
     outNotePh: "Installed baseboards, demo…",
     takePhoto: "Take photo",
+    chooseFromPhotos: "Choose from Photos",
     cancel: "Cancel",
     submitOut: "Submit OUT",
 
@@ -143,18 +150,21 @@ const STR: Record<Lang, Record<string, string>> = {
     blockedAtt: "Daily attestation required",
 
     outNeedNote: "Write at least 2 words about what you did today.",
-    outNeedPhoto: "At least 1 photo is required for OUT (camera only).",
+    outNeedPhoto: "At least 1 photo is required for OUT.",
 
     gpsError: "GPS error",
     permNeeded: "Permission needed",
     allowCamera: "Allow camera access.",
+    allowPhotos: "Allow photo library access.",
+
+    cameraUnavailableTitle: "Camera unavailable",
+    cameraUnavailableMsg: "Camera is not available in iOS Simulator. Choose a photo from Photos instead.",
 
     success: "Success",
     working: "Working…",
     footer: "Designed by zakhargalan.in © 2026",
   },
   es: {
-    appName: "Asistencia GEKON",
     welcome: "Bienvenido",
     enterOnce: "Escribe tu nombre una sola vez. La próxima vez no lo pediremos.",
     yourName: "Tu nombre",
@@ -163,9 +173,11 @@ const STR: Record<Lang, Record<string, string>> = {
     english: "English",
     spanish: "Español",
 
-    statusReady: "Listo para trabajar",
+    statusReady: "Listo",
     statusBlocked: "Bloqueado",
     refresh: "Actualizar",
+    changeName: "Cambiar nombre",
+
     site: "Obra",
     reloadSites: "Recargar obras",
     otherSite: "Otra / Nueva obra…",
@@ -180,6 +192,7 @@ const STR: Record<Lang, Record<string, string>> = {
     outNote: "¿Qué hiciste hoy? (mín. 2 palabras)",
     outNotePh: "Instalé zócalos, demo…",
     takePhoto: "Tomar foto",
+    chooseFromPhotos: "Elegir desde Fotos",
     cancel: "Cancelar",
     submitOut: "Enviar SALIDA",
 
@@ -216,11 +229,15 @@ const STR: Record<Lang, Record<string, string>> = {
     blockedAtt: "Falta la declaración diaria",
 
     outNeedNote: "Escribe al menos 2 palabras sobre lo que hiciste hoy.",
-    outNeedPhoto: "Se requiere al menos 1 foto para SALIDA (solo cámara).",
+    outNeedPhoto: "Se requiere al menos 1 foto para SALIDA.",
 
     gpsError: "Error GPS",
     permNeeded: "Permiso requerido",
     allowCamera: "Permite acceso a la cámara.",
+    allowPhotos: "Permite acceso a Fotos.",
+
+    cameraUnavailableTitle: "Cámara no disponible",
+    cameraUnavailableMsg: "La cámara no está disponible en el simulador iOS. Elige una foto desde Fotos.",
 
     success: "Éxito",
     working: "Procesando…",
@@ -266,6 +283,11 @@ async function sset(key: string, value: string) {
     await SecureStore.setItemAsync(key, value);
   } catch {}
 }
+async function sdel(key: string) {
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {}
+}
 
 function fmtHhMm(ms: number) {
   const totalMin = Math.floor(ms / 60000);
@@ -282,35 +304,115 @@ function fmtHhMmSs(ms: number) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayload | null> {
+// Совместимый selector mediaTypes под разные версии expo-image-picker
+function getImagesMediaTypes(): any {
+  const anyPicker: any = ImagePicker as any;
+  // новые версии
+  if (anyPicker?.MediaType?.Images) return anyPicker.MediaType.Images;
+  // старые версии
+  if (anyPicker?.MediaTypeOptions?.Images) return anyPicker.MediaTypeOptions.Images;
+  return undefined; // пусть будет default
+}
+
+// Гарантированно даём base64: если picker не дал — прогоняем через ImageManipulator
+async function assetToPayload(asset: any): Promise<PhotoPayload | null> {
+  try {
+    const mime = asset?.mimeType || "image/jpeg";
+    if (asset?.base64) return { base64: asset.base64, mime, previewUri: asset.uri };
+
+    // манипулятор часто умеет и ph:// и даёт file://
+    const manipulated = await ImageManipulator.manipulateAsync(
+      asset.uri,
+      [{ resize: { width: 1400 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const b64 = await FileSystem.readAsStringAsync(manipulated.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
+  } catch {
+    return null;
+  }
+}
+
+async function pickFromLibrary(t: (k: string) => string): Promise<PhotoPayload | null> {
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) {
+    Alert.alert(t("permNeeded"), t("allowPhotos"));
+    return null;
+  }
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: getImagesMediaTypes(),
+    quality: 0.8,
+    base64: true,
+    exif: false,
+    allowsMultipleSelection: false,
+  });
+
+  if (result.canceled) return null;
+
+  const asset = result.assets?.[0];
+  if (!asset) return null;
+
+  const payload = await assetToPayload(asset);
+  if (!payload) {
+    Alert.alert("Photo", "Could not attach this image. Please try another one.");
+    return null;
+  }
+  return payload;
+}
+
+async function takePhoto(t: (k: string) => string): Promise<PhotoPayload | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
   if (!perm.granted) {
     Alert.alert(t("permNeeded"), t("allowCamera"));
     return null;
   }
 
-  const result = await ImagePicker.launchCameraAsync({ quality: 1 });
-  if (result.canceled) return null;
+  try {
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: getImagesMediaTypes(),
+      quality: 0.8,
+      base64: true,
+      exif: false,
+    });
 
-  const uri = result.assets?.[0]?.uri;
-  if (!uri) return null;
+    if (result.canceled) return null;
 
-  const manipulated = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: 1400 } }],
-    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-  );
+    const asset = result.assets?.[0];
+    if (!asset) return null;
 
-  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: "base64" });
-  return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
+    const payload = await assetToPayload(asset);
+    if (!payload) {
+      Alert.alert("Photo", "Could not attach this photo. Try again.");
+      return null;
+    }
+    return payload;
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    const noCamera = /simulator|not available|no camera/i.test(msg);
+
+    if (noCamera) {
+      Alert.alert(t("cameraUnavailableTitle"), t("cameraUnavailableMsg"));
+      return await pickFromLibrary(t);
+    }
+
+    Alert.alert("Camera", msg);
+    return null;
+  }
 }
 
 export default function Index() {
-  const insets = useSafeAreaInsets();
-  const topPad = insets.top || (Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0);
+  const androidTopPad = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
 
   const [lang, setLang] = useState<Lang>(sysLangDefault());
   const t = (k: string) => STR[lang][k] || STR.en[k] || k;
+
+  async function setLangPersist(next: Lang) {
+    setLang(next);
+    await sset(STORE.lang, next);
+  }
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -320,6 +422,13 @@ export default function Index() {
   const [nameSaved, setNameSaved] = useState(false);
 
   const [employee, setEmployee] = useState<Employee | null>(null);
+
+  const displayName = useMemo(() => {
+    const serverName = String((employee as any)?.name || "").replace(/\s+/g, " ").trim();
+    const localName = String(name || "").replace(/\s+/g, " ").trim();
+    const chosen = serverName.length >= 2 ? serverName : localName;
+    return chosen || "—";
+  }, [employee, name]);
 
   const [oshaExpiryISO, setOshaExpiryISO] = useState("");
   const [oshaPhoto, setOshaPhoto] = useState<PhotoPayload | null>(null);
@@ -338,7 +447,6 @@ export default function Index() {
   const [otherSiteName, setOtherSiteName] = useState("");
   const [otherRadiusM, setOtherRadiusM] = useState("120");
 
-  const [loc, setLoc] = useState<Loc | null>(null);
   const [distMap, setDistMap] = useState<Record<string, number>>({});
   const [autoSortedOnce, setAutoSortedOnce] = useState(false);
 
@@ -346,7 +454,6 @@ export default function Index() {
   const [outNote, setOutNote] = useState("");
   const [outPhotos, setOutPhotos] = useState<PhotoPayload[]>([]);
 
-  // Timer fields
   const [todayMsBase, setTodayMsBase] = useState(0);
   const [serverNowBaseMs, setServerNowBaseMs] = useState(0);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -401,7 +508,6 @@ export default function Index() {
     refreshDistances().finally(() => setAutoSortedOnce(true));
   }, [nameSaved, sites.length, autoSortedOnce]);
 
-  // real-time ticking
   useEffect(() => {
     setTodayMsLive(todayMsBase);
     setOnSiteMsLive(0);
@@ -409,7 +515,6 @@ export default function Index() {
     const id = setInterval(() => {
       const nowServer = Date.now() + serverOffsetMs;
 
-      // Today ticks only when clocked in
       if (clockedIn) {
         const extra = Math.max(0, nowServer - serverNowBaseMs);
         setTodayMsLive(todayMsBase + extra);
@@ -485,7 +590,6 @@ export default function Index() {
   async function refreshDistances() {
     try {
       const current = await requestLocationOnce();
-      setLoc(current);
       const next: Record<string, number> = {};
       for (const s of sites) next[s.id] = haversineMeters(current.latitude, current.longitude, s.lat, s.lon);
       setDistMap(next);
@@ -516,7 +620,6 @@ export default function Index() {
 
       await initOnServer(deviceId, nm);
       await loadMe(deviceId);
-
       await refreshDistances();
       setAutoSortedOnce(true);
     } catch (e: any) {
@@ -524,6 +627,42 @@ export default function Index() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function resetName() {
+    setBusy(true);
+    try {
+      await sdel(STORE.name);
+      setName("");
+      setNameSaved(false);
+      setEmployee(null);
+
+      setOshaExpiryISO("");
+      setOshaPhoto(null);
+
+      setAttSig("");
+      setAtt1(false);
+      setAtt2(false);
+      setAtt3(false);
+      setAtt4(false);
+
+      setOutPanel(false);
+      setOutNote("");
+      setOutPhotos([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function confirmResetName() {
+    Alert.alert(
+      t("changeName"),
+      "This will reset the saved name on this device. You can enter the correct name again.",
+      [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("changeName"), style: "destructive", onPress: resetName },
+      ]
+    );
   }
 
   async function submitOsha() {
@@ -608,7 +747,6 @@ export default function Index() {
     setBusy(true);
     try {
       const current = await requestLocationOnce();
-      setLoc(current);
 
       const body = {
         action: "site_request",
@@ -642,7 +780,7 @@ export default function Index() {
 
   async function addOutPhoto() {
     if (outPhotos.length >= MAX_OUT_PHOTOS) return;
-    const p = await takeAndCompressPhoto(t);
+    const p = await takePhoto(t);
     if (!p) return;
     setOutPhotos((prev) => [...prev, p]);
   }
@@ -667,7 +805,6 @@ export default function Index() {
     setBusy(true);
     try {
       const current = await requestLocationOnce();
-      setLoc(current);
 
       const payload: any = {
         action: "event",
@@ -679,21 +816,8 @@ export default function Index() {
         device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
       };
 
-      if (!useOther && selectedSite) {
-        payload.siteId = selectedSite.id;
-
-        const d = haversineMeters(current.latitude, current.longitude, selectedSite.lat, selectedSite.lon);
-        const effective = Math.max(0, d - (current.accuracy ?? 0));
-        if (effective > selectedSite.radiusM) {
-          Alert.alert("Not on site", `Distance: ${Math.round(d)}m / Radius: ${selectedSite.radiusM}m`);
-          setBusy(false);
-          return;
-        }
-      } else {
-        const nm = otherSiteName.trim() || "Other site";
-        const rad = Number(otherRadiusM || 120);
-        payload.customSite = { name: nm, lat: current.latitude, lon: current.longitude, radiusM: rad };
-      }
+      if (!useOther && selectedSite) payload.siteId = selectedSite.id;
+      else payload.customSite = { name: otherSiteName.trim() || "Other site", radiusM: Number(otherRadiusM || 120) };
 
       if (type === "OUT") {
         payload.workNote = outNote.trim();
@@ -709,7 +833,7 @@ export default function Index() {
       if (!data?.ok) throw new Error(data?.error || "Server rejected");
 
       applyMe(data);
-      await loadMe(deviceId); // <-- force refresh so clock/site updates immediately
+      await loadMe(deviceId);
 
       if (type === "OUT") {
         setOutPanel(false);
@@ -728,10 +852,10 @@ export default function Index() {
   const oshaState = !employee
     ? "pending"
     : employee.oshaExpired
-      ? "expired"
-      : employee.oshaApproved
-        ? "ok"
-        : "pending";
+    ? "expired"
+    : employee.oshaApproved
+    ? "ok"
+    : "pending";
 
   const attState = !employee ? "pending" : employee.attestedToday ? "ok" : "needed";
 
@@ -740,18 +864,21 @@ export default function Index() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.center, { paddingTop: topPad }]}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
-      </SafeAreaView>
+      <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
+        <SafeAreaView style={[styles.center, { paddingTop: androidTopPad }]}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   if (!nameSaved) {
     return (
-      <SafeAreaView style={{ flex: 1, paddingTop: topPad }}>
-        <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }}>
+      <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
+        <SafeAreaView style={{ flex: 1, paddingTop: androidTopPad }}>
+          <View style={{ flex: 1 }}>
+            <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36, paddingTop: 30 }}>
             <View style={styles.brandHeaderOnboarding}>
               <Image source={LOGO} style={styles.logoBig} resizeMode="contain" />
             </View>
@@ -761,27 +888,23 @@ export default function Index() {
               <Text style={styles.muted}>{t("enterOnce")}</Text>
 
               <Text style={styles.label}>{t("yourName")}</Text>
-              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Galileo Galilei" />
+              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="John Smith" />
 
               <Text style={styles.label}>{t("language")}</Text>
               <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
                 <TouchableOpacity
                   style={[styles.langBtn, lang === "en" ? styles.langBtnOn : null]}
-                  onPress={() => setLang("en")}
+                  onPress={() => setLangPersist("en")}
                   disabled={busy}
                 >
-                  <Text style={[styles.langText, lang === "en" ? styles.langTextOn : null]}>
-                    🇺🇸 {t("english")}
-                  </Text>
+                  <Text style={[styles.langText, lang === "en" ? styles.langTextOn : null]}>🇺🇸 {t("english")}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.langBtn, lang === "es" ? styles.langBtnOn : null]}
-                  onPress={() => setLang("es")}
+                  onPress={() => setLangPersist("es")}
                   disabled={busy}
                 >
-                  <Text style={[styles.langText, lang === "es" ? styles.langTextOn : null]}>
-                    🇪🇸 {t("spanish")}
-                  </Text>
+                  <Text style={[styles.langText, lang === "es" ? styles.langTextOn : null]}>🇪🇸 {t("spanish")}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -796,37 +919,51 @@ export default function Index() {
 
             <Text style={styles.footer}>{t("footer")}</Text>
           </ScrollView>
-        </LinearGradient>
-      </SafeAreaView>
+          <FogEdges />
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, paddingTop: topPad }}>
-      <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }}>
-          <View style={styles.brandHeader}>
-            <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.userName}>{name}</Text>
-              <Text style={styles.mutedSmall}>
-                {ready ? t("statusReady") : `${t("statusBlocked")}: ${gateReason()}`}
-              </Text>
+    <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
+      <SafeAreaView style={{ flex: 1, paddingTop: androidTopPad }}>
+        <View style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36, paddingTop: 30 }}>
+          {/* Header */}
+          <View style={styles.headerCard}>
+            <View style={styles.headerTop}>
+              <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
+              <View style={styles.headerTitleBlock}>
+                <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
+                  {displayName}
+                </Text>
+                {/* оставляем только “Ready/Blocked”, без дубля OSHA */}
+                <Text style={styles.mutedSmall}>{ready ? t("statusReady") : t("statusBlocked")}</Text>
+              </View>
             </View>
-            <TouchableOpacity
-              style={styles.pillBtn}
-              onPress={async () => {
-                setBusy(true);
-                try {
-                  await loadMe(deviceId);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              disabled={busy}
-            >
-              <Text style={styles.pillBtnText}>{t("refresh")}</Text>
-            </TouchableOpacity>
+
+            <View style={styles.headerActionsRow}>
+              <TouchableOpacity
+                style={styles.pillBtn}
+                onPress={async () => {
+                  setBusy(true);
+                  try {
+                    await loadMe(deviceId);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                disabled={busy}
+              >
+                <Text style={styles.pillBtnText}>{t("refresh")}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.pillBtn} onPress={confirmResetName} disabled={busy}>
+                <Text style={styles.pillBtnText}>{t("changeName")}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.chipsRow}>
@@ -867,7 +1004,7 @@ export default function Index() {
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={async () => {
-                    const p = await takeAndCompressPhoto(t);
+                    const p = await takePhoto(t);
                     if (p) setOshaPhoto(p);
                   }}
                   disabled={busy}
@@ -878,11 +1015,12 @@ export default function Index() {
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={async () => {
-                    Alert.alert("Info", "Gallery upload for OSHA is disabled in this build.");
+                    const p = await pickFromLibrary(t);
+                    if (p) setOshaPhoto(p);
                   }}
                   disabled={busy}
                 >
-                  <Text style={styles.secondaryBtnText}>Gallery</Text>
+                  <Text style={styles.secondaryBtnText}>{t("chooseFromPhotos")}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -897,15 +1035,41 @@ export default function Index() {
                   styles.primaryBtn,
                   (!isISODate(oshaExpiryISO) || !oshaPhoto) ? { opacity: 0.5 } : null,
                 ]}
-                onPress={submitOsha}
+                onPress={async () => {
+                  if (!isISODate(oshaExpiryISO)) return;
+                  if (!oshaPhoto) return;
+                  setBusy(true);
+                  try {
+                    const body = {
+                      action: "register_osha",
+                      appKey: APP_KEY,
+                      deviceId,
+                      name: name.trim(),
+                      oshaExpiryISO: oshaExpiryISO.trim(),
+                      oshaPhotoBase64: oshaPhoto.base64,
+                      oshaPhotoMime: oshaPhoto.mime,
+                    };
+                    const res = await fetch(API_URL, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(body),
+                    });
+                    const data: MeResponse = await res.json();
+                    if (!data?.ok) throw new Error(data?.error || "OSHA upload failed");
+                    setOshaPhoto(null);
+                    applyMe(data);
+                    await loadMe(deviceId);
+                    Alert.alert(t("success"), t("uploaded"));
+                  } catch (e: any) {
+                    Alert.alert("Error", String(e?.message || e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
                 disabled={busy || !isISODate(oshaExpiryISO) || !oshaPhoto}
               >
                 <Text style={styles.primaryBtnText}>{t("uploadOSHA")}</Text>
               </TouchableOpacity>
-
-              {employee && !employee.oshaApproved && !employee.oshaExpired ? (
-                <Text style={[styles.mutedSmall, { marginTop: 8 }]}>{t("uploaded")}</Text>
-              ) : null}
             </View>
           ) : null}
 
@@ -918,7 +1082,7 @@ export default function Index() {
               <CheckRow label={t("attest4")} checked={att4} onToggle={() => setAtt4(!att4)} />
 
               <Text style={styles.label}>{t("signature")}</Text>
-              <TextInput value={attSig} onChangeText={setAttSig} style={styles.input} placeholder={name} />
+              <TextInput value={attSig} onChangeText={setAttSig} style={styles.input} placeholder={displayName} />
 
               <TouchableOpacity
                 style={[
@@ -961,10 +1125,7 @@ export default function Index() {
                 {sortedSites.map((s) => (
                   <TouchableOpacity
                     key={s.id}
-                    style={[
-                      styles.siteItem,
-                      s.id === siteId && !useOther ? styles.siteItemOn : null,
-                    ]}
+                    style={[styles.siteItem, s.id === siteId && !useOther ? styles.siteItemOn : null]}
                     onPress={() => {
                       setUseOther(false);
                       setSiteId(s.id);
@@ -1056,11 +1217,7 @@ export default function Index() {
                   <Text style={styles.secondaryBtnText}>{t("cancel")}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[
-                    styles.primaryBtn,
-                    { flex: 1, marginTop: 0 },
-                    (!outNote.trim() || outPhotos.length < 1) ? { opacity: 0.5 } : null,
-                  ]}
+                  style={[styles.primaryBtn, { flex: 1, marginTop: 0 }, (!outNote.trim() || outPhotos.length < 1) ? { opacity: 0.5 } : null]}
                   onPress={() => sendEvent("OUT")}
                   disabled={busy}
                 >
@@ -1079,8 +1236,27 @@ export default function Index() {
             </View>
           ) : null}
         </ScrollView>
-      </LinearGradient>
-    </SafeAreaView>
+        <FogEdges />
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
+function FogEdges() {
+  return (
+    <>
+      <LinearGradient
+        colors={[C.fog, C.fog + "00"]}
+        style={styles.fogTop}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={[C.fog + "00", C.fog]}
+        style={styles.fogBottom}
+        pointerEvents="none"
+      />
+    </>
   );
 }
 
@@ -1117,13 +1293,30 @@ function CheckRow({ label, checked, onToggle }: { label: string; checked: boolea
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   brandHeaderOnboarding: { alignItems: "center", marginBottom: 6 },
   logoBig: { width: "100%", height: 84 },
 
-  brandHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
-  logoSmall: { width: 70, height: 36 },
+  headerCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+    marginBottom: 12,
+  },
+  headerTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  logoSmall: { width: 62, height: 34 },
+  headerTitleBlock: { flex: 1, minWidth: 0 }, // ключ от “переноса по буквам”
+
+  headerActionsRow: { flexDirection: "row", gap: 10, marginTop: 10 },
 
   userName: { fontSize: 20, fontWeight: "900", color: C.navy },
   mutedSmall: { color: C.muted, marginTop: 2 },
@@ -1211,28 +1404,30 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: C.navy, fontWeight: "900" },
 
   pillBtn: {
+    flex: 1,
     paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(11,27,59,0.18)",
     backgroundColor: "#fff",
+    alignItems: "center",
   },
   pillBtnText: { color: C.navy, fontWeight: "900" },
 
-  chipsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
+  chipsRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   chip: {
     flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  chipText: { color: C.muted, fontWeight: "800" },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  chipText: { color: C.muted, fontWeight: "800", fontSize: 13, flexShrink: 1 },
 
   sitePicker: {
     borderWidth: 1,
@@ -1298,5 +1493,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.65)",
+  },
+
+  fogTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    zIndex: 10,
+  },
+  fogBottom: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    zIndex: 10,
   },
 });
