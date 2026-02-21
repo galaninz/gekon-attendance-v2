@@ -44,9 +44,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "ccacheEnabled": false,
-            "extraPods": [],
-            "compiler_flags": "-DFOLLY_NO_CONFIG=1 -DFOLLY_CFG_NO_COROUTINES=1 -DFOLLY_HAS_COROUTINES=0"
+            "deploymentTarget": "15.1"
           }
         }
       ]
