@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
   Image,
-  LogBox,
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -22,11 +22,6 @@ import * as Localization from "expo-localization";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
-LogBox.ignoreLogs([
-  // Если у тебя старая версия и она ругается на MediaTypeOptions — скрываем этот dev-warn.
-  "[expo-image-picker] `ImagePicker.MediaTypeOptions` have been deprecated",
-]);
-
 const API_URL =
   "https://script.google.com/macros/s/AKfycbz0fjpzP6KOn_0mPkz5zTJfTQbLmIrY6ZwvhFT4dBP-6t-kJLyM6DO_eneJDYH7a--l3A/exec";
 const APP_KEY = "ZAK_ATT_2026_demo";
@@ -37,8 +32,6 @@ const STORE = {
   deviceId: "deviceId",
   name: "name",
   lang: "lang",
-  cacheSites: "cache_sites",
-  cacheMe: "cache_me",
 };
 
 type Lang = "en" | "es";
@@ -65,6 +58,9 @@ type MeResponse = {
   openInISO: string;
   currentSiteName?: string;
   error?: string;
+  distanceM?: number;
+  radiusM?: number;
+  inZone?: boolean;
 };
 
 type PhotoPayload = { base64: string; mime: string; previewUri: string };
@@ -74,10 +70,8 @@ const MAX_OUT_PHOTOS = 3;
 const C = {
   navy: "#0B1B3B",
   blue: "#2D5BFF",
-  fog: "#F2F2F7",      // цвет шторки iOS
-  bgTop: "#F2F2F7",   // совпадает со шторкой iOS
-  bgMid: "#F5F6FA",
-  bgBot: "#F2F2F7",   // совпадает со шторкой iOS
+  bg1: "#F7F9FF",
+  bg2: "#FFFFFF",
   text: "#0B1320",
   muted: "#5B6475",
   border: "#E5E8F0",
@@ -88,6 +82,7 @@ const C = {
 
 const STR: Record<Lang, Record<string, string>> = {
   en: {
+    appName: "GEKON Attendance",
     welcome: "Welcome",
     enterOnce: "Enter your name once. Next time we won’t ask.",
     yourName: "Your name",
@@ -96,11 +91,9 @@ const STR: Record<Lang, Record<string, string>> = {
     english: "English",
     spanish: "Español",
 
-    statusReady: "Ready",
+    statusReady: "Ready to work",
     statusBlocked: "Blocked",
     refresh: "Refresh",
-    changeName: "Change name",
-
     site: "Site",
     reloadSites: "Reload sites",
     otherSite: "Other / New site…",
@@ -115,7 +108,6 @@ const STR: Record<Lang, Record<string, string>> = {
     outNote: "What did you do today? (min 2 words)",
     outNotePh: "Installed baseboards, demo…",
     takePhoto: "Take photo",
-    chooseFromPhotos: "Choose from Photos",
     cancel: "Cancel",
     submitOut: "Submit OUT",
 
@@ -137,10 +129,13 @@ const STR: Record<Lang, Record<string, string>> = {
     uploaded: "OSHA uploaded. Waiting for admin approval.",
 
     attestTitle: "Daily Safety Attestation",
-    attest1: "I completed today’s safety briefing / toolbox talk.",
-    attest2: "I am sober and fit for duty.",
-    attest3: "I have required PPE.",
-    attest4: "I understand the rules and have no claims/complaints at this time.",
+    attVideoBtn: "▶  Watch OSHA Safety Video",
+    attRulesBtn: "📋  View OSHA Site Safety Rules",
+    attest1: "I watched the OSHA safety video and/or reviewed the site safety rules before starting work today.",
+    attest2: "I am NOT under the influence of alcohol, drugs, or any substance that impairs my judgment or physical ability.",
+    attest3: "I have inspected my PPE (hard hat, gloves, boots, vest, eye protection) — it is in good condition and I will wear it at all times on site.",
+    attest4: "I have no pre-existing injuries that could be aggravated by today’s work. If I do, I have reported them to my supervisor BEFORE starting.",
+    attest5: "I understand that falsifying this attestation is grounds for immediate termination and may result in forfeiture of workers’ compensation benefits.",
     signature: "Signature (type your name)",
     submitAtt: "Submit attestation",
     attDone: "Daily attestation recorded.",
@@ -152,21 +147,22 @@ const STR: Record<Lang, Record<string, string>> = {
     blockedAtt: "Daily attestation required",
 
     outNeedNote: "Write at least 2 words about what you did today.",
-    outNeedPhoto: "At least 1 photo is required for OUT.",
+    outNeedPhoto: "At least 1 photo is required for OUT (camera only).",
 
     gpsError: "GPS error",
     permNeeded: "Permission needed",
     allowCamera: "Allow camera access.",
-    allowPhotos: "Allow photo library access.",
-
-    cameraUnavailableTitle: "Camera unavailable",
-    cameraUnavailableMsg: "Camera is not available in iOS Simulator. Choose a photo from Photos instead.",
 
     success: "Success",
     working: "Working…",
+    emergencyOut: "Emergency OUT",
+    emergencyOutTitle: "Emergency Clock-Out",
+    emergencyOutExplain: "Use only if you forgot to clock out on site. Your current time will be recorded. Your supervisor will review and may adjust this entry.",
+    emergencyOutConfirm: "Yes, Emergency OUT",
     footer: "Designed by zakhargalan.in © 2026",
   },
   es: {
+    appName: "Asistencia GEKON",
     welcome: "Bienvenido",
     enterOnce: "Escribe tu nombre una sola vez. La próxima vez no lo pediremos.",
     yourName: "Tu nombre",
@@ -175,11 +171,9 @@ const STR: Record<Lang, Record<string, string>> = {
     english: "English",
     spanish: "Español",
 
-    statusReady: "Listo",
+    statusReady: "Listo para trabajar",
     statusBlocked: "Bloqueado",
     refresh: "Actualizar",
-    changeName: "Cambiar nombre",
-
     site: "Obra",
     reloadSites: "Recargar obras",
     otherSite: "Otra / Nueva obra…",
@@ -194,7 +188,6 @@ const STR: Record<Lang, Record<string, string>> = {
     outNote: "¿Qué hiciste hoy? (mín. 2 palabras)",
     outNotePh: "Instalé zócalos, demo…",
     takePhoto: "Tomar foto",
-    chooseFromPhotos: "Elegir desde Fotos",
     cancel: "Cancelar",
     submitOut: "Enviar SALIDA",
 
@@ -216,10 +209,13 @@ const STR: Record<Lang, Record<string, string>> = {
     uploaded: "OSHA subido. Esperando aprobación del admin.",
 
     attestTitle: "Declaración diaria de seguridad",
-    attest1: "Completé la charla de seguridad de hoy.",
-    attest2: "Estoy sobrio y apto para trabajar.",
-    attest3: "Tengo el EPP requerido.",
-    attest4: "Entiendo las reglas y no tengo reclamos en este momento.",
+    attVideoBtn: "▶  Ver Video de Seguridad OSHA",
+    attRulesBtn: "📋  Ver Reglas de Seguridad OSHA",
+    attest1: "Vi el video de seguridad OSHA y/o revisé las reglas del sitio antes de comenzar a trabajar hoy.",
+    attest2: "NO estoy bajo la influencia de alcohol, drogas ni ninguna sustancia que afecte mi juicio o capacidad física.",
+    attest3: "Inspeccioné mi EPP (casco, guantes, botas, chaleco, protección ocular) — está en buen estado y lo usaré en todo momento.",
+    attest4: "No tengo lesiones preexistentes que puedan agravarse con el trabajo de hoy. Si las tengo, las he reportado a mi supervisor ANTES de comenzar.",
+    attest5: "Entiendo que falsificar esta declaración es motivo de despido inmediato y puede resultar en la pérdida de beneficios de compensación laboral.",
     signature: "Firma (escribe tu nombre)",
     submitAtt: "Enviar declaración",
     attDone: "Declaración diaria registrada.",
@@ -231,18 +227,18 @@ const STR: Record<Lang, Record<string, string>> = {
     blockedAtt: "Falta la declaración diaria",
 
     outNeedNote: "Escribe al menos 2 palabras sobre lo que hiciste hoy.",
-    outNeedPhoto: "Se requiere al menos 1 foto para SALIDA.",
+    outNeedPhoto: "Se requiere al menos 1 foto para SALIDA (solo cámara).",
 
     gpsError: "Error GPS",
     permNeeded: "Permiso requerido",
     allowCamera: "Permite acceso a la cámara.",
-    allowPhotos: "Permite acceso a Fotos.",
-
-    cameraUnavailableTitle: "Cámara no disponible",
-    cameraUnavailableMsg: "La cámara no está disponible en el simulador iOS. Elige una foto desde Fotos.",
 
     success: "Éxito",
     working: "Procesando…",
+    emergencyOut: "SALIDA de emergencia",
+    emergencyOutTitle: "Salida de emergencia",
+    emergencyOutExplain: "Usar solo si olvidaste marcar salida en el sitio. Se registrará la hora actual. Tu supervisor revisará esta entrada.",
+    emergencyOutConfirm: "Sí, Salida de emergencia",
     footer: "Designed by zakhargalan.in © 2026",
   },
 };
@@ -273,6 +269,13 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return R * c;
 }
 
+function fmtDist(meters: number): string {
+  const feet = meters * 3.28084;
+  if (feet < 1000) return `${Math.round(feet)} ft`;
+  const miles = meters / 1609.344;
+  return `${miles.toFixed(1)} mi`;
+}
+
 async function sget(key: string) {
   try {
     return await SecureStore.getItemAsync(key);
@@ -283,11 +286,6 @@ async function sget(key: string) {
 async function sset(key: string, value: string) {
   try {
     await SecureStore.setItemAsync(key, value);
-  } catch {}
-}
-async function sdel(key: string) {
-  try {
-    await SecureStore.deleteItemAsync(key);
   } catch {}
 }
 
@@ -306,115 +304,32 @@ function fmtHhMmSs(ms: number) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-// Совместимый selector mediaTypes под разные версии expo-image-picker
-function getImagesMediaTypes(): any {
-  const anyPicker: any = ImagePicker as any;
-  // новые версии
-  if (anyPicker?.MediaType?.Images) return anyPicker.MediaType.Images;
-  // старые версии
-  if (anyPicker?.MediaTypeOptions?.Images) return anyPicker.MediaTypeOptions.Images;
-  return undefined; // пусть будет default
-}
-
-// Гарантированно даём base64: если picker не дал — прогоняем через ImageManipulator
-async function assetToPayload(asset: any): Promise<PhotoPayload | null> {
-  try {
-    const mime = asset?.mimeType || "image/jpeg";
-    if (asset?.base64) return { base64: asset.base64, mime, previewUri: asset.uri };
-
-    // манипулятор часто умеет и ph:// и даёт file://
-    const manipulated = await ImageManipulator.manipulateAsync(
-      asset.uri,
-      [{ resize: { width: 1400 } }],
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    const b64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
-  } catch {
-    return null;
-  }
-}
-
-async function pickFromLibrary(t: (k: string) => string): Promise<PhotoPayload | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) {
-    Alert.alert(t("permNeeded"), t("allowPhotos"));
-    return null;
-  }
-
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: getImagesMediaTypes(),
-    quality: 0.8,
-    base64: true,
-    exif: false,
-    allowsMultipleSelection: false,
-  });
-
-  if (result.canceled) return null;
-
-  const asset = result.assets?.[0];
-  if (!asset) return null;
-
-  const payload = await assetToPayload(asset);
-  if (!payload) {
-    Alert.alert("Photo", "Could not attach this image. Please try another one.");
-    return null;
-  }
-  return payload;
-}
-
-async function takePhoto(t: (k: string) => string): Promise<PhotoPayload | null> {
+async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayload | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
   if (!perm.granted) {
     Alert.alert(t("permNeeded"), t("allowCamera"));
     return null;
   }
 
-  try {
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: getImagesMediaTypes(),
-      quality: 0.8,
-      base64: true,
-      exif: false,
-    });
+  const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+  if (result.canceled) return null;
 
-    if (result.canceled) return null;
+  const uri = result.assets?.[0]?.uri;
+  if (!uri) return null;
 
-    const asset = result.assets?.[0];
-    if (!asset) return null;
+  const manipulated = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: 1400 } }],
+    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+  );
 
-    const payload = await assetToPayload(asset);
-    if (!payload) {
-      Alert.alert("Photo", "Could not attach this photo. Try again.");
-      return null;
-    }
-    return payload;
-  } catch (e: any) {
-    const msg = String(e?.message || e);
-    const noCamera = /simulator|not available|no camera/i.test(msg);
-
-    if (noCamera) {
-      Alert.alert(t("cameraUnavailableTitle"), t("cameraUnavailableMsg"));
-      return await pickFromLibrary(t);
-    }
-
-    Alert.alert("Camera", msg);
-    return null;
-  }
+  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: FileSystem.EncodingType.Base64 });
+  return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
 }
 
 export default function Index() {
-  const androidTopPad = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
-
   const [lang, setLang] = useState<Lang>(sysLangDefault());
-  const t = (k: string) => STR[lang][k] || STR.en[k] || k;
-
-  async function setLangPersist(next: Lang) {
-    setLang(next);
-    await sset(STORE.lang, next);
-  }
+  const t = useCallback((k: string) => STR[lang][k] || STR.en[k] || k, [lang]);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -425,13 +340,6 @@ export default function Index() {
 
   const [employee, setEmployee] = useState<Employee | null>(null);
 
-  const displayName = useMemo(() => {
-    const serverName = String((employee as any)?.name || "").replace(/\s+/g, " ").trim();
-    const localName = String(name || "").replace(/\s+/g, " ").trim();
-    const chosen = serverName.length >= 2 ? serverName : localName;
-    return chosen || "—";
-  }, [employee, name]);
-
   const [oshaExpiryISO, setOshaExpiryISO] = useState("");
   const [oshaPhoto, setOshaPhoto] = useState<PhotoPayload | null>(null);
 
@@ -440,6 +348,7 @@ export default function Index() {
   const [att2, setAtt2] = useState(false);
   const [att3, setAtt3] = useState(false);
   const [att4, setAtt4] = useState(false);
+  const [att5, setAtt5] = useState(false);
 
   const [sites, setSites] = useState<Site[]>([]);
   const [siteId, setSiteId] = useState<string>("");
@@ -449,6 +358,7 @@ export default function Index() {
   const [otherSiteName, setOtherSiteName] = useState("");
   const [otherRadiusM, setOtherRadiusM] = useState("120");
 
+  const [loc, setLoc] = useState<Loc | null>(null);
   const [distMap, setDistMap] = useState<Record<string, number>>({});
   const [autoSortedOnce, setAutoSortedOnce] = useState(false);
 
@@ -456,6 +366,7 @@ export default function Index() {
   const [outNote, setOutNote] = useState("");
   const [outPhotos, setOutPhotos] = useState<PhotoPayload[]>([]);
 
+  // Timer fields
   const [todayMsBase, setTodayMsBase] = useState(0);
   const [serverNowBaseMs, setServerNowBaseMs] = useState(0);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -476,61 +387,39 @@ export default function Index() {
 
   useEffect(() => {
     (async () => {
-      const savedLang = (await sget(STORE.lang)) as Lang | null;
-      if (savedLang === "en" || savedLang === "es") setLang(savedLang);
+      // ① Read local storage instantly (no network)
+      const [savedLang, savedDeviceId, savedName] = await Promise.all([
+        sget(STORE.lang),
+        sget(STORE.deviceId),
+        sget(STORE.name),
+      ]);
 
-      let did = (await sget(STORE.deviceId)) || "";
+      if (savedLang === "en" || savedLang === "es") setLang(savedLang as Lang);
+
+      let did = savedDeviceId || "";
       if (!did) {
         did = genDeviceId();
         await sset(STORE.deviceId, did);
       }
       setDeviceId(did);
 
-      const savedName = (await sget(STORE.name)) || "";
-      if (savedName) {
-        setName(savedName);
+      const savedNameStr = savedName || "";
+      if (savedNameStr) {
+        setName(savedNameStr);
         setNameSaved(true);
       }
 
-      // ─── Кэш: показываем мгновенно ───
-      let hasCache = false;
-      try {
-        const [cachedSitesRaw, cachedMeRaw] = await Promise.all([
-          sget(STORE.cacheSites),
-          sget(STORE.cacheMe),
-        ]);
-        if (cachedSitesRaw) {
-          const cached: Site[] = JSON.parse(cachedSitesRaw);
-          if (cached.length) {
-            setSites(cached);
-            if (!siteId && cached[0]?.id) setSiteId(cached[0].id);
-          }
-        }
-        if (cachedMeRaw && savedName) {
-          const cached: MeResponse = JSON.parse(cachedMeRaw);
-          if (cached?.employee) {
-            applyMe(cached);
-            hasCache = true;
-          }
-        }
-      } catch {}
+      // ② Show UI immediately — no spinner waiting for network
+      setLoading(false);
 
-      // Если есть кэш — убираем спиннер сразу, сеть обновит в фоне
-      if (hasCache) setLoading(false);
+      // ③ Network calls in background — non-blocking
+      try { await loadSites(); } catch {}
 
-      // ─── Сеть: обновляем в фоне ───
-      if (savedName) {
-        Promise.all([
-          loadSites().catch(() => {}),
-          initOnServer(did, savedName)
-            .then(() => loadMe(did))
-            .catch(() => {}),
-        ]).finally(() => {
-          if (!hasCache) setLoading(false);
-        });
-      } else {
-        loadSites().catch(() => {});
-        setLoading(false);
+      if (savedNameStr) {
+        try {
+          await initOnServer(did, savedNameStr);
+          await loadMe(did);
+        } catch {}
       }
     })();
   }, []);
@@ -542,6 +431,7 @@ export default function Index() {
     refreshDistances().finally(() => setAutoSortedOnce(true));
   }, [nameSaved, sites.length, autoSortedOnce]);
 
+  // real-time ticking
   useEffect(() => {
     setTodayMsLive(todayMsBase);
     setOnSiteMsLive(0);
@@ -549,6 +439,7 @@ export default function Index() {
     const id = setInterval(() => {
       const nowServer = Date.now() + serverOffsetMs;
 
+      // Today ticks only when clocked in
       if (clockedIn) {
         const extra = Math.max(0, nowServer - serverNowBaseMs);
         setTodayMsLive(todayMsBase + extra);
@@ -573,8 +464,6 @@ export default function Index() {
     if (!data?.ok) throw new Error(data?.error || "Sites load failed");
     setSites(data.sites || []);
     if (!siteId && data.sites?.[0]?.id) setSiteId(data.sites[0].id);
-    // Кэшируем
-    sset(STORE.cacheSites, JSON.stringify(data.sites || [])).catch(() => {});
   }
 
   async function initOnServer(did: string, nm: string) {
@@ -613,8 +502,6 @@ export default function Index() {
     const data: MeResponse = await res.json();
     if (!data?.ok) throw new Error(data?.error || "Me load failed");
     applyMe(data);
-    // Кэшируем
-    sset(STORE.cacheMe, JSON.stringify(data)).catch(() => {});
   }
 
   async function requestLocationOnce(): Promise<Loc> {
@@ -628,6 +515,7 @@ export default function Index() {
   async function refreshDistances() {
     try {
       const current = await requestLocationOnce();
+      setLoc(current);
       const next: Record<string, number> = {};
       for (const s of sites) next[s.id] = haversineMeters(current.latitude, current.longitude, s.lat, s.lon);
       setDistMap(next);
@@ -658,6 +546,7 @@ export default function Index() {
 
       await initOnServer(deviceId, nm);
       await loadMe(deviceId);
+
       await refreshDistances();
       setAutoSortedOnce(true);
     } catch (e: any) {
@@ -665,42 +554,6 @@ export default function Index() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function resetName() {
-    setBusy(true);
-    try {
-      await sdel(STORE.name);
-      setName("");
-      setNameSaved(false);
-      setEmployee(null);
-
-      setOshaExpiryISO("");
-      setOshaPhoto(null);
-
-      setAttSig("");
-      setAtt1(false);
-      setAtt2(false);
-      setAtt3(false);
-      setAtt4(false);
-
-      setOutPanel(false);
-      setOutNote("");
-      setOutPhotos([]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function confirmResetName() {
-    Alert.alert(
-      t("changeName"),
-      "This will reset the saved name on this device. You can enter the correct name again.",
-      [
-        { text: t("cancel"), style: "cancel" },
-        { text: t("changeName"), style: "destructive", onPress: resetName },
-      ]
-    );
   }
 
   async function submitOsha() {
@@ -737,7 +590,7 @@ export default function Index() {
   }
 
   async function submitAttestation() {
-    const allChecked = att1 && att2 && att3 && att4;
+    const allChecked = att1 && att2 && att3 && att4 && att5;
     if (!allChecked) return;
     const sig = attSig.trim();
     if (!sig) return;
@@ -750,7 +603,7 @@ export default function Index() {
         deviceId,
         name: name.trim(),
         signature: sig,
-        statements: { safetyBriefing: att1, soberFitForDuty: att2, ppeReady: att3, noClaims: att4 },
+        statements: { watchedSafetyVideo: att1, notUnderInfluence: att2, ppeInspected: att3, noPreExistingInjuries: att4, understoodConsequences: att5 },
         device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
       };
       const res = await fetch(API_URL, {
@@ -766,6 +619,7 @@ export default function Index() {
       setAtt2(false);
       setAtt3(false);
       setAtt4(false);
+      setAtt5(false);
 
       applyMe(data);
       await loadMe(deviceId);
@@ -785,6 +639,7 @@ export default function Index() {
     setBusy(true);
     try {
       const current = await requestLocationOnce();
+      setLoc(current);
 
       const body = {
         action: "site_request",
@@ -818,7 +673,7 @@ export default function Index() {
 
   async function addOutPhoto() {
     if (outPhotos.length >= MAX_OUT_PHOTOS) return;
-    const p = await takePhoto(t);
+    const p = await takeAndCompressPhoto(t);
     if (!p) return;
     setOutPhotos((prev) => [...prev, p]);
   }
@@ -843,6 +698,7 @@ export default function Index() {
     setBusy(true);
     try {
       const current = await requestLocationOnce();
+      setLoc(current);
 
       const payload: any = {
         action: "event",
@@ -854,8 +710,21 @@ export default function Index() {
         device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
       };
 
-      if (!useOther && selectedSite) payload.siteId = selectedSite.id;
-      else payload.customSite = { name: otherSiteName.trim() || "Other site", radiusM: Number(otherRadiusM || 120) };
+      if (!useOther && selectedSite) {
+        payload.siteId = selectedSite.id;
+
+        const d = haversineMeters(current.latitude, current.longitude, selectedSite.lat, selectedSite.lon);
+        const effective = Math.max(0, d - (current.accuracy ?? 0));
+        if (effective > selectedSite.radiusM) {
+          Alert.alert("Not on site", `Distance: ${fmtDist(d)} / Radius: ${fmtDist(selectedSite.radiusM)}`);
+          setBusy(false);
+          return;
+        }
+      } else {
+        const nm = otherSiteName.trim() || "Other site";
+        const rad = Number(otherRadiusM || 120);
+        payload.customSite = { name: nm, lat: current.latitude, lon: current.longitude, radiusM: rad };
+      }
 
       if (type === "OUT") {
         payload.workNote = outNote.trim();
@@ -871,7 +740,7 @@ export default function Index() {
       if (!data?.ok) throw new Error(data?.error || "Server rejected");
 
       applyMe(data);
-      await loadMe(deviceId);
+      await loadMe(deviceId); // <-- force refresh so clock/site updates immediately
 
       if (type === "OUT") {
         setOutPanel(false);
@@ -887,13 +756,55 @@ export default function Index() {
     }
   }
 
+  async function sendEmergencyOut() {
+    Alert.alert(
+      t("emergencyOutTitle"),
+      t("emergencyOutExplain"),
+      [
+        { text: t("cancel"), style: "cancel" },
+        {
+          text: t("emergencyOutConfirm"),
+          style: "destructive",
+          onPress: async () => {
+            setBusy(true);
+            try {
+              const payload = {
+                action: "event",
+                appKey: APP_KEY,
+                deviceId,
+                name: name.trim(),
+                type: "OUT",
+                emergencyOut: true,
+                device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
+              };
+              const res = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const data: MeResponse = await res.json();
+              if (!data?.ok) throw new Error(data?.error || "Server rejected");
+              applyMe(data);
+              await loadMe(deviceId);
+              Alert.alert(t("success"), "Emergency OUT recorded. Your supervisor will review.");
+            } catch (e: any) {
+              Alert.alert("Error", String(e?.message || e));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   const oshaState = !employee
     ? "pending"
     : employee.oshaExpired
-    ? "expired"
-    : employee.oshaApproved
-    ? "ok"
-    : "pending";
+      ? "expired"
+      : employee.oshaApproved
+        ? "ok"
+        : "pending";
 
   const attState = !employee ? "pending" : employee.attestedToday ? "ok" : "needed";
 
@@ -902,21 +813,19 @@ export default function Index() {
 
   if (loading) {
     return (
-      <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
-        <SafeAreaView style={[styles.center, { paddingTop: androidTopPad }]}>
-          <ActivityIndicator />
-          <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
-        </SafeAreaView>
-      </LinearGradient>
+      <SafeAreaView style={[styles.center, { backgroundColor: "#FFFFFF" }]}>
+        <ActivityIndicator />
+        <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
+      </SafeAreaView>
     );
   }
 
   if (!nameSaved) {
     return (
-      <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
-        <SafeAreaView style={{ flex: 1, paddingTop: androidTopPad }}>
-          <View style={{ flex: 1 }}>
-            <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36, paddingTop: 30 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
+        <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
             <View style={styles.brandHeaderOnboarding}>
               <Image source={LOGO} style={styles.logoBig} resizeMode="contain" />
             </View>
@@ -926,23 +835,27 @@ export default function Index() {
               <Text style={styles.muted}>{t("enterOnce")}</Text>
 
               <Text style={styles.label}>{t("yourName")}</Text>
-              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="John Smith" />
+              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Galileo Galilei" />
 
               <Text style={styles.label}>{t("language")}</Text>
               <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
                 <TouchableOpacity
                   style={[styles.langBtn, lang === "en" ? styles.langBtnOn : null]}
-                  onPress={() => setLangPersist("en")}
+                  onPress={() => setLang("en")}
                   disabled={busy}
                 >
-                  <Text style={[styles.langText, lang === "en" ? styles.langTextOn : null]}>🇺🇸 {t("english")}</Text>
+                  <Text style={[styles.langText, lang === "en" ? styles.langTextOn : null]}>
+                    🇺🇸 {t("english")}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.langBtn, lang === "es" ? styles.langBtnOn : null]}
-                  onPress={() => setLangPersist("es")}
+                  onPress={() => setLang("es")}
                   disabled={busy}
                 >
-                  <Text style={[styles.langText, lang === "es" ? styles.langTextOn : null]}>🇪🇸 {t("spanish")}</Text>
+                  <Text style={[styles.langText, lang === "es" ? styles.langTextOn : null]}>
+                    🇪🇸 {t("spanish")}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -957,51 +870,38 @@ export default function Index() {
 
             <Text style={styles.footer}>{t("footer")}</Text>
           </ScrollView>
-          <FogEdges />
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
+        </LinearGradient>
+      </SafeAreaView>
     );
   }
 
   return (
-    <LinearGradient colors={[C.bgTop, C.bgMid, C.bgBot]} style={styles.root}>
-      <SafeAreaView style={{ flex: 1, paddingTop: androidTopPad }}>
-        <View style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36, paddingTop: 30 }}>
-          {/* Header */}
-          <View style={styles.headerCard}>
-            <View style={styles.headerTop}>
-              <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
-              <View style={styles.headerTitleBlock}>
-                <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
-                  {displayName}
-                </Text>
-                {/* оставляем только “Ready/Blocked”, без дубля OSHA */}
-                <Text style={styles.mutedSmall}>{ready ? t("statusReady") : t("statusBlocked")}</Text>
-              </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
+      <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
+          <View style={styles.brandHeader}>
+            <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.userName}>{name}</Text>
+              <Text style={styles.mutedSmall}>
+                {ready ? t("statusReady") : `${t("statusBlocked")}: ${gateReason()}`}
+              </Text>
             </View>
-
-            <View style={styles.headerActionsRow}>
-              <TouchableOpacity
-                style={styles.pillBtn}
-                onPress={async () => {
-                  setBusy(true);
-                  try {
-                    await loadMe(deviceId);
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                disabled={busy}
-              >
-                <Text style={styles.pillBtnText}>{t("refresh")}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.pillBtn} onPress={confirmResetName} disabled={busy}>
-                <Text style={styles.pillBtnText}>{t("changeName")}</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.pillBtn}
+              onPress={async () => {
+                setBusy(true);
+                try {
+                  await loadMe(deviceId);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+            >
+              <Text style={styles.pillBtnText}>{t("refresh")}</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.chipsRow}>
@@ -1042,7 +942,7 @@ export default function Index() {
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={async () => {
-                    const p = await takePhoto(t);
+                    const p = await takeAndCompressPhoto(t);
                     if (p) setOshaPhoto(p);
                   }}
                   disabled={busy}
@@ -1053,12 +953,11 @@ export default function Index() {
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={async () => {
-                    const p = await pickFromLibrary(t);
-                    if (p) setOshaPhoto(p);
+                    Alert.alert("Info", "Gallery upload for OSHA is disabled in this build.");
                   }}
                   disabled={busy}
                 >
-                  <Text style={styles.secondaryBtnText}>{t("chooseFromPhotos")}</Text>
+                  <Text style={styles.secondaryBtnText}>Gallery</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1073,62 +972,66 @@ export default function Index() {
                   styles.primaryBtn,
                   (!isISODate(oshaExpiryISO) || !oshaPhoto) ? { opacity: 0.5 } : null,
                 ]}
-                onPress={async () => {
-                  if (!isISODate(oshaExpiryISO)) return;
-                  if (!oshaPhoto) return;
-                  setBusy(true);
-                  try {
-                    const body = {
-                      action: "register_osha",
-                      appKey: APP_KEY,
-                      deviceId,
-                      name: name.trim(),
-                      oshaExpiryISO: oshaExpiryISO.trim(),
-                      oshaPhotoBase64: oshaPhoto.base64,
-                      oshaPhotoMime: oshaPhoto.mime,
-                    };
-                    const res = await fetch(API_URL, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(body),
-                    });
-                    const data: MeResponse = await res.json();
-                    if (!data?.ok) throw new Error(data?.error || "OSHA upload failed");
-                    setOshaPhoto(null);
-                    applyMe(data);
-                    await loadMe(deviceId);
-                    Alert.alert(t("success"), t("uploaded"));
-                  } catch (e: any) {
-                    Alert.alert("Error", String(e?.message || e));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onPress={submitOsha}
                 disabled={busy || !isISODate(oshaExpiryISO) || !oshaPhoto}
               >
                 <Text style={styles.primaryBtnText}>{t("uploadOSHA")}</Text>
               </TouchableOpacity>
+
+              {employee && !employee.oshaApproved && !employee.oshaExpired ? (
+                <Text style={[styles.mutedSmall, { marginTop: 8 }]}>{t("uploaded")}</Text>
+              ) : null}
             </View>
           ) : null}
 
           {showAttestBlock ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{t("attestTitle")}</Text>
+
+              {/* Video & Rules links */}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.linkBtn, { flex: 1 }]}
+                  onPress={() => Linking.openURL(
+                    lang === "es"
+                      ? "https://www.osha.gov/vtools/construction"
+                      : "https://www.osha.gov/vtools/construction"
+                  )}
+                >
+                  <Text style={styles.linkBtnText}>{t("attVideoBtn")}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.linkBtn, { flex: 1 }]}
+                  onPress={() => Linking.openURL("https://www.osha.gov/construction")}
+                >
+                  <Text style={styles.linkBtnText}>{t("attRulesBtn")}</Text>
+                </TouchableOpacity>
+              </View>
+
               <CheckRow label={t("attest1")} checked={att1} onToggle={() => setAtt1(!att1)} />
               <CheckRow label={t("attest2")} checked={att2} onToggle={() => setAtt2(!att2)} />
               <CheckRow label={t("attest3")} checked={att3} onToggle={() => setAtt3(!att3)} />
               <CheckRow label={t("attest4")} checked={att4} onToggle={() => setAtt4(!att4)} />
+              <CheckRow label={t("attest5")} checked={att5} onToggle={() => setAtt5(!att5)} />
 
               <Text style={styles.label}>{t("signature")}</Text>
-              <TextInput value={attSig} onChangeText={setAttSig} style={styles.input} placeholder={displayName} />
+              <TextInput
+                value={attSig}
+                onChangeText={setAttSig}
+                style={styles.input}
+                placeholder={name}
+                placeholderTextColor="#5B6475"
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
 
               <TouchableOpacity
                 style={[
                   styles.primaryBtn,
-                  (!(att1 && att2 && att3 && att4) || !attSig.trim()) ? { opacity: 0.5 } : null,
+                  (!(att1 && att2 && att3 && att4 && att5) || !attSig.trim()) ? { opacity: 0.5 } : null,
                 ]}
                 onPress={submitAttestation}
-                disabled={busy || !(att1 && att2 && att3 && att4) || !attSig.trim()}
+                disabled={busy || !(att1 && att2 && att3 && att4 && att5) || !attSig.trim()}
               >
                 <Text style={styles.primaryBtnText}>{t("submitAtt")}</Text>
               </TouchableOpacity>
@@ -1150,7 +1053,7 @@ export default function Index() {
                 {useOther ? t("otherSite") : selectedSite ? selectedSite.name : t("site")}
               </Text>
               <Text style={styles.mutedSmall}>
-                {useOther ? t("otherSiteHint") : selectedSite ? `${Math.round(distMap[selectedSite.id] ?? 0)} m` : ""}
+                {useOther ? t("otherSiteHint") : selectedSite ? fmtDist(distMap[selectedSite.id] ?? 0) : ""}
               </Text>
             </TouchableOpacity>
 
@@ -1163,7 +1066,10 @@ export default function Index() {
                 {sortedSites.map((s) => (
                   <TouchableOpacity
                     key={s.id}
-                    style={[styles.siteItem, s.id === siteId && !useOther ? styles.siteItemOn : null]}
+                    style={[
+                      styles.siteItem,
+                      s.id === siteId && !useOther ? styles.siteItemOn : null,
+                    ]}
                     onPress={() => {
                       setUseOther(false);
                       setSiteId(s.id);
@@ -1172,7 +1078,7 @@ export default function Index() {
                     disabled={busy}
                   >
                     <Text style={styles.siteItemText}>{s.name}</Text>
-                    <Text style={styles.mutedSmall}>{Math.round(distMap[s.id] ?? 9e9)} m</Text>
+                    <Text style={styles.mutedSmall}>{fmtDist(distMap[s.id] ?? 0)}</Text>
                   </TouchableOpacity>
                 ))}
 
@@ -1223,6 +1129,16 @@ export default function Index() {
             </TouchableOpacity>
           </View>
 
+          {clockedIn && !outPanel ? (
+            <TouchableOpacity
+              style={styles.emergencyBtn}
+              onPress={sendEmergencyOut}
+              disabled={busy}
+            >
+              <Text style={styles.emergencyBtnText}>⚠️  {t("emergencyOut")}</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {outPanel ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{t("outTitle")}</Text>
@@ -1255,7 +1171,11 @@ export default function Index() {
                   <Text style={styles.secondaryBtnText}>{t("cancel")}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.primaryBtn, { flex: 1, marginTop: 0 }, (!outNote.trim() || outPhotos.length < 1) ? { opacity: 0.5 } : null]}
+                  style={[
+                    styles.primaryBtn,
+                    { flex: 1, marginTop: 0 },
+                    (!outNote.trim() || outPhotos.length < 1) ? { opacity: 0.5 } : null,
+                  ]}
                   onPress={() => sendEvent("OUT")}
                   disabled={busy}
                 >
@@ -1274,27 +1194,15 @@ export default function Index() {
             </View>
           ) : null}
         </ScrollView>
-        <FogEdges />
-        </View>
-      </SafeAreaView>
-    </LinearGradient>
-  );
-}
 
-function FogEdges() {
-  return (
-    <>
-      <LinearGradient
-        colors={[C.fog, C.fog + "00"]}
-        style={styles.fogTop}
-        pointerEvents="none"
-      />
-      <LinearGradient
-        colors={[C.fog + "00", C.fog]}
-        style={styles.fogBottom}
-        pointerEvents="none"
-      />
-    </>
+        {/* Bottom fade so buttons don't get visually cut off */}
+        <LinearGradient
+          colors={["transparent", C.bg2]}
+          style={styles.bottomFade}
+          pointerEvents="none"
+        />
+      </LinearGradient>
+    </SafeAreaView>
   );
 }
 
@@ -1331,30 +1239,13 @@ function CheckRow({ label, checked, onToggle }: { label: string; checked: boolea
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   brandHeaderOnboarding: { alignItems: "center", marginBottom: 6 },
-  logoBig: { width: "100%", height: 84 },
+  logoBig: { width: 120, height: 84, alignSelf: "center" },
 
-  headerCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
-    marginBottom: 12,
-  },
-  headerTop: { flexDirection: "row", alignItems: "center", gap: 12 },
-  logoSmall: { width: 62, height: 34 },
-  headerTitleBlock: { flex: 1, minWidth: 0 }, // ключ от “переноса по буквам”
-
-  headerActionsRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  brandHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
+  logoSmall: { width: 70, height: 36 },
 
   userName: { fontSize: 20, fontWeight: "900", color: C.navy },
   mutedSmall: { color: C.muted, marginTop: 2 },
@@ -1397,16 +1288,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     color: C.text,
     backgroundColor: "#fff",
+    fontSize: 15,
+    minHeight: 44,
   },
 
   langBtn: {
     flex: 1,
     borderWidth: 1,
     borderColor: C.border,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 12,
     alignItems: "center",
     backgroundColor: "#fff",
+    minHeight: 44,
+    justifyContent: "center",
   },
   langBtnOn: { borderColor: "rgba(45,91,255,0.35)", backgroundColor: "rgba(45,91,255,0.08)" },
   langText: { color: C.navy, fontWeight: "800" },
@@ -1415,9 +1310,11 @@ const styles = StyleSheet.create({
   primaryBtn: {
     marginTop: 12,
     backgroundColor: C.blue,
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderRadius: 12,
     alignItems: "center",
+    minHeight: 44,
+    justifyContent: "center",
   },
   primaryBtnText: { color: "#fff", fontWeight: "900" },
 
@@ -1442,21 +1339,19 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: C.navy, fontWeight: "900" },
 
   pillBtn: {
-    flex: 1,
     paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(11,27,59,0.18)",
     backgroundColor: "#fff",
-    alignItems: "center",
   },
   pillBtnText: { color: C.navy, fontWeight: "900" },
 
-  chipsRow: { flexDirection: "row", gap: 8, marginTop: 4 },
+  chipsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   chip: {
     flex: 1,
-    paddingVertical: 9,
+    paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
@@ -1464,8 +1359,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  chipText: { color: C.muted, fontWeight: "800", fontSize: 13, flexShrink: 1 },
+  dot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
+  chipText: { color: C.muted, fontWeight: "800", fontSize: 12, flexShrink: 1, flexWrap: "wrap" as const },
 
   sitePicker: {
     borderWidth: 1,
@@ -1497,6 +1392,21 @@ const styles = StyleSheet.create({
   actionOut: { backgroundColor: C.navy },
   actionText: { color: "#fff", fontWeight: "900", fontSize: 15 },
 
+  emergencyBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "rgba(245,165,36,0.5)",
+    backgroundColor: "rgba(245,165,36,0.08)",
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: "center" as const,
+  },
+  emergencyBtnText: {
+    color: "#B97A00",
+    fontWeight: "800" as const,
+    fontSize: 13,
+  },
+
   preview: { width: "100%", height: 190, borderRadius: 14 },
   previewSmall: { width: "100%", height: 150, borderRadius: 14 },
 
@@ -1515,6 +1425,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  linkBtn: {
+    borderWidth: 1,
+    borderColor: "rgba(45,91,255,0.3)",
+    backgroundColor: "rgba(45,91,255,0.06)",
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+  },
+  linkBtnText: {
+    color: "#2D5BFF",
+    fontWeight: "800",
+    fontSize: 12,
+    textAlign: "center",
+  },
+
+  bottomFade: {
+    position: "absolute" as const,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 80,
+    pointerEvents: "none" as const,
+  },
   footer: {
     marginTop: 16,
     textAlign: "center",
@@ -1531,22 +1467,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.65)",
-  },
-
-  fogTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    zIndex: 10,
-  },
-  fogBottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    zIndex: 10,
   },
 });
