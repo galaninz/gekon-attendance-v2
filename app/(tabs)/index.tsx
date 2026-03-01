@@ -155,6 +155,9 @@ const STR: Record<Lang, Record<string, string>> = {
 
     success: "Success",
     working: "Working…",
+    changeName: "Edit",
+    changeNameTitle: "Change Name",
+    changeNameSave: "Save",
     emergencyOut: "Emergency OUT",
     emergencyOutTitle: "Emergency Clock-Out",
     emergencyOutExplain: "Use only if you forgot to clock out on site. Your current time will be recorded. Your supervisor will review and may adjust this entry.",
@@ -235,6 +238,9 @@ const STR: Record<Lang, Record<string, string>> = {
 
     success: "Éxito",
     working: "Procesando…",
+    changeName: "Editar",
+    changeNameTitle: "Cambiar nombre",
+    changeNameSave: "Guardar",
     emergencyOut: "SALIDA de emergencia",
     emergencyOutTitle: "Salida de emergencia",
     emergencyOutExplain: "Usar solo si olvidaste marcar salida en el sitio. Se registrará la hora actual. Tu supervisor revisará esta entrada.",
@@ -337,6 +343,7 @@ export default function Index() {
   const [deviceId, setDeviceId] = useState("");
   const [name, setName] = useState("");
   const [nameSaved, setNameSaved] = useState(false);
+  const [editingName, setEditingName] = useState(false);
 
   const [employee, setEmployee] = useState<Employee | null>(null);
 
@@ -883,7 +890,58 @@ export default function Index() {
           <View style={styles.brandHeader}>
             <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
             <View style={{ flex: 1 }}>
-              <Text style={styles.userName}>{name}</Text>
+              {editingName ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <TextInput
+                    value={name}
+                    onChangeText={setName}
+                    style={[styles.input, { flex: 1, marginBottom: 0, paddingVertical: 6 }]}
+                    autoFocus
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={async () => {
+                      if (name.trim().length < 2) return;
+                      setBusy(true);
+                      try {
+                        await sset(STORE.name, name.trim());
+                        await initOnServer(deviceId, name.trim());
+                        await loadMe(deviceId);
+                        setEditingName(false);
+                      } catch (e: any) {
+                        Alert.alert("Error", String(e?.message || e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (name.trim().length < 2) return;
+                      setBusy(true);
+                      try {
+                        await sset(STORE.name, name.trim());
+                        await initOnServer(deviceId, name.trim());
+                        await loadMe(deviceId);
+                        setEditingName(false);
+                      } catch (e: any) {
+                        Alert.alert("Error", String(e?.message || e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    disabled={busy}
+                    style={[styles.pillBtn, { paddingHorizontal: 10 }]}
+                  >
+                    <Text style={styles.pillBtnText}>{t("changeNameSave")}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity onPress={() => setEditingName(true)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={styles.userName}>{name}</Text>
+                  <Text style={{ fontSize: 11, color: C.blue, fontWeight: "700", marginTop: 2 }}>✎</Text>
+                </TouchableOpacity>
+              )}
               <Text style={styles.mutedSmall}>
                 {ready ? t("statusReady") : `${t("statusBlocked")}: ${gateReason()}`}
               </Text>
