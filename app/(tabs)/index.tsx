@@ -156,6 +156,10 @@ const STR: Record<Lang, Record<string, string>> = {
     success: "Success",
     working: "Working…",
     changeName: "Edit",
+    resetBtn: "Reset",
+    resetTitle: "Reset App",
+    resetMsg: "This will clear your name and return to the welcome screen. Continue?",
+    resetConfirm: "Reset",
     changeNameTitle: "Change Name",
     changeNameSave: "Save",
     emergencyOut: "Emergency OUT",
@@ -239,6 +243,10 @@ const STR: Record<Lang, Record<string, string>> = {
     success: "Éxito",
     working: "Procesando…",
     changeName: "Editar",
+    resetBtn: "Resetear",
+    resetTitle: "Restablecer App",
+    resetMsg: "Esto borrará tu nombre y volverás a la pantalla de bienvenida. ¿Continuar?",
+    resetConfirm: "Restablecer",
     changeNameTitle: "Cambiar nombre",
     changeNameSave: "Guardar",
     emergencyOut: "SALIDA de emergencia",
@@ -292,6 +300,11 @@ async function sget(key: string) {
 async function sset(key: string, value: string) {
   try {
     await SecureStore.setItemAsync(key, value);
+  } catch {}
+}
+async function sdel(key: string) {
+  try {
+    await SecureStore.deleteItemAsync(key);
   } catch {}
 }
 
@@ -763,6 +776,25 @@ export default function Index() {
     }
   }
 
+  async function resetApp() {
+    Alert.alert(t("resetTitle"), t("resetMsg"), [
+      { text: t("cancel"), style: "cancel" },
+      {
+        text: t("resetConfirm"),
+        style: "destructive",
+        onPress: async () => {
+          await sdel(STORE.name);
+          await sdel(STORE.deviceId);
+          await sdel(STORE.lang);
+          setName("");
+          setNameSaved(false);
+          setEditingName(false);
+          setEmployee(null);
+        },
+      },
+    ]);
+  }
+
   async function sendEmergencyOut() {
     Alert.alert(
       t("emergencyOutTitle"),
@@ -875,7 +907,13 @@ export default function Index() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.footer}>{t("footer")}</Text>
+            <TouchableOpacity
+            onPress={resetApp}
+            style={{ alignItems: "center", marginTop: 24, marginBottom: 4 }}
+          >
+            <Text style={{ fontSize: 12, color: C.muted, fontWeight: "700" }}>{t("resetBtn")}</Text>
+          </TouchableOpacity>
+          <Text style={styles.footer}>{t("footer")}</Text>
           </ScrollView>
         </LinearGradient>
       </SafeAreaView>
@@ -937,9 +975,8 @@ export default function Index() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                <TouchableOpacity onPress={() => setEditingName(true)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <TouchableOpacity onPress={() => setEditingName(true)}>
                   <Text style={styles.userName}>{name}</Text>
-                  <Text style={{ fontSize: 11, color: C.blue, fontWeight: "700", marginTop: 2 }}>✎</Text>
                 </TouchableOpacity>
               )}
               <Text style={styles.mutedSmall}>
@@ -1243,6 +1280,12 @@ export default function Index() {
             </View>
           ) : null}
 
+          <TouchableOpacity
+            onPress={resetApp}
+            style={{ alignItems: "center", marginTop: 24, marginBottom: 4 }}
+          >
+            <Text style={{ fontSize: 12, color: C.muted, fontWeight: "700" }}>{t("resetBtn")}</Text>
+          </TouchableOpacity>
           <Text style={styles.footer}>{t("footer")}</Text>
 
           {busy ? (
