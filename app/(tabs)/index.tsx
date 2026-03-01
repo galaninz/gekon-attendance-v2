@@ -330,17 +330,62 @@ async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayl
     return null;
   }
 
-  const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+  const result = await ImagePicker.launchCameraAsync({ quality: 0.9, base64: true });
   if (result.canceled) return null;
 
-  const uri = result.assets?.[0]?.uri;
-  if (!uri) return null;
+  const asset = result.assets?.[0];
+  if (!asset) return null;
+
+  // Use base64 directly from camera result if available (avoids FileSystem issues)
+  if (asset.base64) {
+    return { base64: asset.base64, mime: "image/jpeg", previewUri: asset.uri };
+  }
+
+  // Fallback: compress and read
+  const manipulated = await ImageManipulator.manipulateAsync(
+    asset.uri,
+    [{ resize: { width: 1400 } }],
+    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+  );
+
+  if (manipulated.base64) {
+    return { base64: manipulated.base64, mime: "image/jpeg", previewUri: manipulated.uri };
+  }
+
+  const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: FileSystem.EncodingType.Base64 });
+  return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
+}
+
+async function pickFromGallery(t: (k: string) => string): Promise<PhotoPayload | null> {
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) {
+    Alert.alert(t("permNeeded"), "Allow photo library access in Settings.");
+    return null;
+  }
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 0.9,
+    base64: true,
+  });
+  if (result.canceled) return null;
+
+  const asset = result.assets?.[0];
+  if (!asset) return null;
+
+  if (asset.base64) {
+    return { base64: asset.base64, mime: "image/jpeg", previewUri: asset.uri };
+  }
 
   const manipulated = await ImageManipulator.manipulateAsync(
-    uri,
+    asset.uri,
     [{ resize: { width: 1400 } }],
-    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
   );
+
+  if (manipulated.base64) {
+    return { base64: manipulated.base64, mime: "image/jpeg", previewUri: manipulated.uri };
+  }
 
   const b64 = await FileSystem.readAsStringAsync(manipulated.uri, { encoding: FileSystem.EncodingType.Base64 });
   return { base64: b64, mime: "image/jpeg", previewUri: manipulated.uri };
@@ -698,6 +743,13 @@ export default function Index() {
     setOutPhotos((prev) => [...prev, p]);
   }
 
+  async function addOutPhotoFromGallery() {
+    if (outPhotos.length >= MAX_OUT_PHOTOS) return;
+    const p = await pickFromGallery(t);
+    if (!p) return;
+    setOutPhotos((prev) => [...prev, p]);
+  }
+
   async function sendEvent(type: "IN" | "OUT") {
     if (!ready) {
       Alert.alert(t("statusBlocked"), gateReason());
@@ -1048,7 +1100,8 @@ export default function Index() {
                 <TouchableOpacity
                   style={styles.secondaryBtn}
                   onPress={async () => {
-                    Alert.alert("Info", "Gallery upload for OSHA is disabled in this build.");
+                    const p = await pickFromGallery(t);
+                    if (p) setOshaPhoto(p);
                   }}
                   disabled={busy}
                 >
