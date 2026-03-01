@@ -1195,9 +1195,15 @@ export default function Index() {
           ) : null}
         </ScrollView>
 
-        {/* Bottom fade so buttons don't get visually cut off */}
+        {/* Top fade */}
         <LinearGradient
-          colors={["transparent", C.bg2]}
+          colors={["rgba(247,249,255,1)", "rgba(247,249,255,0)"]}
+          style={styles.topFade}
+          pointerEvents="none"
+        />
+        {/* Bottom fade */}
+        <LinearGradient
+          colors={["rgba(255,255,255,0)", "rgba(255,255,255,1)"]}
           style={styles.bottomFade}
           pointerEvents="none"
         />
@@ -1443,12 +1449,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  topFade: {
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 32,
+    pointerEvents: "none" as const,
+  },
   bottomFade: {
     position: "absolute" as const,
     bottom: 0,
     left: 0,
     right: 0,
-    height: 80,
+    height: 40,
     pointerEvents: "none" as const,
   },
   footer: {
