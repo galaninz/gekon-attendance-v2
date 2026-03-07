@@ -23,7 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
 const API_URL =
-  "https://script.google.com/macros/s/AKfycbz0fjpzP6KOn_0mPkz5zTJfTQbLmIrY6ZwvhFT4dBP-6t-kJLyM6DO_eneJDYH7a--l3A/exec";
+  "https://script.google.com/macros/s/AKfycbxpG8uUM_CkU_fGbSeOd9TH7lmRHYnhKby2iPHiH12bX6G0kvtx_58TLWS9tNHCzfzuEQ/exec";
 const APP_KEY = "ZAK_ATT_2026_demo";
 
 const LOGO = require("../../assets/gekon.png");
@@ -156,6 +156,7 @@ const STR: Record<Lang, Record<string, string>> = {
     success: "Success",
     working: "Working…",
     changeName: "Edit",
+    noNearbySites: "No job sites within 500 ft. Use \"Other site\" or move closer to your site.",
     resetBtn: "Reset",
     resetTitle: "Reset App",
     resetMsg: "This will clear your name and return to the welcome screen. Continue?",
@@ -243,6 +244,7 @@ const STR: Record<Lang, Record<string, string>> = {
     success: "Éxito",
     working: "Procesando…",
     changeName: "Editar",
+    noNearbySites: "No hay obras a menos de 500 pies. Usa \"Otro sitio\" o acércate al sitio.",
     resetBtn: "Resetear",
     resetTitle: "Restablecer App",
     resetMsg: "Esto borrará tu nombre y volverás a la pantalla de bienvenida. ¿Continuar?",
@@ -444,11 +446,20 @@ export default function Index() {
 
   const selectedSite = useMemo(() => sites.find((s) => s.id === siteId) || null, [sites, siteId]);
 
+  const NEARBY_FT = 500;
+  const NEARBY_M = NEARBY_FT * 0.3048; // ~152m
+
   const sortedSites = useMemo(() => {
     const arr = [...sites];
     arr.sort((a, b) => (distMap[a.id] ?? 9e15) - (distMap[b.id] ?? 9e15));
-    return arr;
-  }, [sites, distMap]);
+    // If we have distance data, show only sites within NEARBY_FT
+    // Always show selected site even if far
+    const hasDistData = arr.some(s => distMap[s.id] != null);
+    if (!hasDistData) return arr; // no GPS yet — show all
+    return arr.filter(s =>
+      (distMap[s.id] ?? 9e15) <= NEARBY_M || s.id === siteId
+    );
+  }, [sites, distMap, siteId]);
 
   useEffect(() => {
     (async () => {
@@ -859,15 +870,20 @@ export default function Index() {
           onPress: async () => {
             setBusy(true);
             try {
-              const payload = {
+              const payload: any = {
                 action: "event",
                 appKey: APP_KEY,
                 deviceId,
                 name: name.trim(),
                 type: "OUT",
                 emergencyOut: true,
+                skipGpsCheck: true,
+                coords: { lat: 0, lon: 0, accuracyM: 0 },
                 device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
               };
+              if (!useOther && selectedSite) {
+                payload.siteId = selectedSite.id;
+              }
               const res = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1211,6 +1227,9 @@ export default function Index() {
 
             {sitePickerOpen ? (
               <View style={{ marginTop: 10 }}>
+                {sortedSites.length === 0 ? (
+                  <Text style={[styles.muted, { marginBottom: 6 }]}>{t("noNearbySites")}</Text>
+                ) : null}
                 {sortedSites.map((s) => (
                   <TouchableOpacity
                     key={s.id}
