@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -19,15 +20,12 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system";
 import * as Localization from "expo-localization";
-import Constants from "expo-constants";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import DateTimePicker from "@react-native-community/datetimepicker";
 
 const API_URL =
-  "https://script.google.com/macros/s/AKfycbyy6hvmzswVCQEO7TEsRI8WxuilJnV1byY6qWAsYB-beuEqm3tAOBI3TKPguWjL6iz2Pw/exec";
+  "https://script.google.com/macros/s/AKfycbxpG8uUM_CkU_fGbSeOd9TH7lmRHYnhKby2iPHiH12bX6G0kvtx_58TLWS9tNHCzfzuEQ/exec";
 const APP_KEY = "ZAK_ATT_2026_demo";
-const APP_VERSION = Constants.expoConfig?.version || Constants.manifest?.version || "1.0.0";
 
 const LOGO = require("../../assets/gekon.png");
 
@@ -35,7 +33,6 @@ const STORE = {
   deviceId: "deviceId",
   name: "name",
   lang: "lang",
-  position: "position",
 };
 
 type Lang = "en" | "es";
@@ -45,7 +42,6 @@ type Employee = {
   employeeId: string;
   code: string;
   name: string;
-  position: string;
   status: string;
   oshaExpiryISO: string;
   oshaExpired: boolean;
@@ -62,13 +58,10 @@ type MeResponse = {
   clockedIn: boolean;
   openInISO: string;
   currentSiteName?: string;
-  sitesVisited?: { name: string; ms: number; hours: number }[];
   error?: string;
   distanceM?: number;
   radiusM?: number;
   inZone?: boolean;
-  updateRequired?: boolean;
-  updateUrl?: string;
 };
 
 type PhotoPayload = { base64: string; mime: string; previewUri: string };
@@ -79,7 +72,7 @@ const C = {
   navy: "#0B1B3B",
   blue: "#2D5BFF",
   bg1: "#F7F9FF",
-  bg2: "#F7F9FF",
+  bg2: "#FFFFFF",
   text: "#0B1320",
   muted: "#5B6475",
   border: "#E5E8F0",
@@ -92,10 +85,8 @@ const STR: Record<Lang, Record<string, string>> = {
   en: {
     appName: "GEKON Attendance",
     welcome: "Welcome",
-    enterOnce: "Enter your name once. Next time we won't ask.",
+    enterOnce: "Enter your name once. Next time we won’t ask.",
     yourName: "Your name",
-    position: "Position (optional)",
-    positionPh: "Foreman, Carpenter, Laborer…",
     continue: "Continue",
     language: "Language",
     english: "English",
@@ -106,9 +97,14 @@ const STR: Record<Lang, Record<string, string>> = {
     refresh: "Refresh",
     site: "Site",
     reloadSites: "Reload sites",
+    otherSite: "Other / New site…",
+    otherSiteHint: "request + custom log",
+    newSiteName: "New site name",
+    radius: "Radius (m)",
+    sendRequest: "Send request to admin",
 
-    in: "I'm IN",
-    out: "I'm OUT",
+    in: "I’m IN",
+    out: "I’m OUT",
     outTitle: "Before OUT",
     outNote: "What did you do today? (min 2 words)",
     outNotePh: "Installed baseboards, demo…",
@@ -127,19 +123,11 @@ const STR: Record<Lang, Record<string, string>> = {
     needed: "Needed",
     done: "Done",
 
-    oshaTitle: "OSHA Card",
-    oshaExplain: "Upload your OSHA card and select the expiration date.",
-    expiry: "OSHA expiry date",
-    selectDate: "Select date",
+    oshaTitle: "OSHA verification required",
+    oshaExplain: "You cannot check IN/OUT until OSHA is valid and approved by admin.",
+    expiry: "OSHA expiry (YYYY-MM-DD)",
     uploadOSHA: "Upload OSHA",
     uploaded: "OSHA uploaded. Waiting for admin approval.",
-
-    pendingTitle: "Waiting for Approval",
-    pendingExplain: "Your OSHA card has been submitted. An admin will review and approve it. Please check back later.",
-    reuploadOsha: "Re-upload OSHA Card",
-    oshaExpiredTitle: "OSHA Card Expired",
-    oshaExpiredExplain: "Your OSHA card has expired. Please upload a new one.",
-    oshaNotSubmitted: "Please upload your OSHA card to continue.",
 
     attestTitle: "Daily Safety Attestation",
     attVideoBtn: "▶  Watch OSHA Safety Video",
@@ -147,8 +135,8 @@ const STR: Record<Lang, Record<string, string>> = {
     attest1: "I watched the OSHA safety video and/or reviewed the site safety rules before starting work today.",
     attest2: "I am NOT under the influence of alcohol, drugs, or any substance that impairs my judgment or physical ability.",
     attest3: "I have inspected my PPE (hard hat, gloves, boots, vest, eye protection) — it is in good condition and I will wear it at all times on site.",
-    attest4: "I have no pre-existing injuries that could be aggravated by today's work. If I do, I have reported them to my supervisor BEFORE starting.",
-    attest5: "I understand that falsifying this attestation is grounds for immediate termination and may result in forfeiture of workers' compensation benefits.",
+    attest4: "I have no pre-existing injuries that could be aggravated by today’s work. If I do, I have reported them to my supervisor BEFORE starting.",
+    attest5: "I understand that falsifying this attestation is grounds for immediate termination and may result in forfeiture of workers’ compensation benefits.",
     signature: "Signature (type your name)",
     submitAtt: "Submit attestation",
     attDone: "Daily attestation recorded.",
@@ -180,9 +168,6 @@ const STR: Record<Lang, Record<string, string>> = {
     emergencyOutTitle: "Emergency Clock-Out",
     emergencyOutExplain: "Use only if you forgot to clock out on site. Your current time will be recorded. Your supervisor will review and may adjust this entry.",
     emergencyOutConfirm: "Yes, Emergency OUT",
-    updateTitle: "Update Available",
-    updateMsg: "A new version of the app is available. Please update to continue.",
-    updateBtn: "Update Now",
     footer: "Designed by zakhargalan.in © 2026",
   },
   es: {
@@ -190,8 +175,6 @@ const STR: Record<Lang, Record<string, string>> = {
     welcome: "Bienvenido",
     enterOnce: "Escribe tu nombre una sola vez. La próxima vez no lo pediremos.",
     yourName: "Tu nombre",
-    position: "Puesto (opcional)",
-    positionPh: "Capataz, Carpintero, Obrero…",
     continue: "Continuar",
     language: "Idioma",
     english: "English",
@@ -202,6 +185,11 @@ const STR: Record<Lang, Record<string, string>> = {
     refresh: "Actualizar",
     site: "Obra",
     reloadSites: "Recargar obras",
+    otherSite: "Otra / Nueva obra…",
+    otherSiteHint: "solicitud + registro",
+    newSiteName: "Nombre de la obra",
+    radius: "Radio (m)",
+    sendRequest: "Enviar solicitud al admin",
 
     in: "Estoy DENTRO",
     out: "Estoy FUERA",
@@ -223,19 +211,11 @@ const STR: Record<Lang, Record<string, string>> = {
     needed: "Falta",
     done: "Hecho",
 
-    oshaTitle: "Tarjeta OSHA",
-    oshaExplain: "Sube tu tarjeta OSHA y selecciona la fecha de vencimiento.",
-    expiry: "Fecha de vencimiento OSHA",
-    selectDate: "Seleccionar fecha",
+    oshaTitle: "Verificación OSHA requerida",
+    oshaExplain: "No puedes marcar IN/OUT hasta que OSHA sea válido y aprobado por el admin.",
+    expiry: "Vencimiento OSHA (YYYY-MM-DD)",
     uploadOSHA: "Subir OSHA",
     uploaded: "OSHA subido. Esperando aprobación del admin.",
-
-    pendingTitle: "Esperando Aprobación",
-    pendingExplain: "Tu tarjeta OSHA ha sido enviada. Un administrador la revisará y aprobará. Por favor, vuelve a intentar más tarde.",
-    reuploadOsha: "Re-subir Tarjeta OSHA",
-    oshaExpiredTitle: "Tarjeta OSHA Vencida",
-    oshaExpiredExplain: "Tu tarjeta OSHA ha vencido. Por favor sube una nueva.",
-    oshaNotSubmitted: "Por favor sube tu tarjeta OSHA para continuar.",
 
     attestTitle: "Declaración diaria de seguridad",
     attVideoBtn: "▶  Ver Video de Seguridad OSHA",
@@ -276,9 +256,6 @@ const STR: Record<Lang, Record<string, string>> = {
     emergencyOutTitle: "Salida de emergencia",
     emergencyOutExplain: "Usar solo si olvidaste marcar salida en el sitio. Se registrará la hora actual. Tu supervisor revisará esta entrada.",
     emergencyOutConfirm: "Sí, Salida de emergencia",
-    updateTitle: "Actualización Disponible",
-    updateMsg: "Hay una nueva versión de la app. Por favor actualiza para continuar.",
-    updateBtn: "Actualizar",
     footer: "Designed by zakhargalan.in © 2026",
   },
 };
@@ -291,6 +268,10 @@ function sysLangDefault(): Lang {
 
 function genDeviceId() {
   return `dev_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function isISODate(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -345,13 +326,6 @@ function fmtHhMmSs(ms: number) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayload | null> {
   const perm = await ImagePicker.requestCameraPermissionsAsync();
   if (!perm.granted) {
@@ -365,10 +339,12 @@ async function takeAndCompressPhoto(t: (k: string) => string): Promise<PhotoPayl
   const asset = result.assets?.[0];
   if (!asset) return null;
 
+  // Use base64 directly from camera result if available (avoids FileSystem issues)
   if (asset.base64) {
     return { base64: asset.base64, mime: "image/jpeg", previewUri: asset.uri };
   }
 
+  // Fallback: compress and read
   const manipulated = await ImageManipulator.manipulateAsync(
     asset.uri,
     [{ resize: { width: 1400 } }],
@@ -427,25 +403,13 @@ export default function Index() {
 
   const [deviceId, setDeviceId] = useState("");
   const [name, setName] = useState("");
-  const [position, setPosition] = useState("");
   const [nameSaved, setNameSaved] = useState(false);
   const [editingName, setEditingName] = useState(false);
 
   const [employee, setEmployee] = useState<Employee | null>(null);
-  const [updateRequired, setUpdateRequired] = useState(false);
-  const [updateUrl, setUpdateUrl] = useState("");
 
-  // OSHA fields (used in registration AND re-upload)
-  const [oshaExpiryDate, setOshaExpiryDate] = useState<Date>(
-    () => {
-      const d = new Date();
-      d.setFullYear(d.getFullYear() + 1);
-      return d;
-    }
-  );
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [oshaExpiryISO, setOshaExpiryISO] = useState("");
   const [oshaPhoto, setOshaPhoto] = useState<PhotoPayload | null>(null);
-  const [showReupload, setShowReupload] = useState(false);
 
   const [attSig, setAttSig] = useState("");
   const [att1, setAtt1] = useState(false);
@@ -458,6 +422,9 @@ export default function Index() {
   const [siteId, setSiteId] = useState<string>("");
   const [sitePickerOpen, setSitePickerOpen] = useState(false);
 
+  const [useOther, setUseOther] = useState(false);
+  const [otherSiteName, setOtherSiteName] = useState("");
+  const [otherRadiusM, setOtherRadiusM] = useState("120");
 
   const [loc, setLoc] = useState<Loc | null>(null);
   const [distMap, setDistMap] = useState<Record<string, number>>({});
@@ -481,43 +448,27 @@ export default function Index() {
   const selectedSite = useMemo(() => sites.find((s) => s.id === siteId) || null, [sites, siteId]);
 
   const NEARBY_FT = 500;
-  const NEARBY_M = NEARBY_FT * 0.3048;
+  const NEARBY_M = NEARBY_FT * 0.3048; // ~152m
 
   const sortedSites = useMemo(() => {
     const arr = [...sites];
     arr.sort((a, b) => (distMap[a.id] ?? 9e15) - (distMap[b.id] ?? 9e15));
+    // If we have distance data, show only sites within NEARBY_FT
+    // Always show selected site even if far
     const hasDistData = arr.some(s => distMap[s.id] != null);
-    if (!hasDistData) return arr;
+    if (!hasDistData) return arr; // no GPS yet — show all
     return arr.filter(s =>
       (distMap[s.id] ?? 9e15) <= NEARBY_M || s.id === siteId
     );
   }, [sites, distMap, siteId]);
 
-  // ---- Determine which screen to show ----
-  const oshaSubmitted = !!employee?.oshaCardFileId;
-  const oshaApproved = !!employee?.oshaApproved;
-  const oshaExpired = !!employee?.oshaExpired;
-
-  // Screen: "pending" = OSHA submitted but not approved (and not expired)
-  // Screen: "blocked" = OSHA expired or not submitted
-  // Screen: "main" = approved and not expired
-  const screenMode = !nameSaved
-    ? "registration"
-    : !employee
-      ? "loading"
-      : oshaApproved && !oshaExpired
-        ? "main"
-        : oshaSubmitted && !oshaApproved && !oshaExpired
-          ? "pending"
-          : "blocked"; // expired or not submitted
-
   useEffect(() => {
     (async () => {
-      const [savedLang, savedDeviceId, savedName, savedPosition] = await Promise.all([
+      // ① Read local storage instantly (no network)
+      const [savedLang, savedDeviceId, savedName] = await Promise.all([
         sget(STORE.lang),
         sget(STORE.deviceId),
         sget(STORE.name),
-        sget(STORE.position),
       ]);
 
       if (savedLang === "en" || savedLang === "es") setLang(savedLang as Lang);
@@ -529,21 +480,21 @@ export default function Index() {
       }
       setDeviceId(did);
 
-      if (savedPosition) setPosition(savedPosition);
-
       const savedNameStr = savedName || "";
       if (savedNameStr) {
         setName(savedNameStr);
         setNameSaved(true);
       }
 
+      // ② Show UI immediately — no spinner waiting for network
       setLoading(false);
 
+      // ③ Network calls in background — non-blocking
       try { await loadSites(); } catch {}
 
       if (savedNameStr) {
         try {
-          await initOnServer(did, savedNameStr, savedPosition || "");
+          await initOnServer(did, savedNameStr);
           await loadMe(did);
         } catch {}
       }
@@ -554,9 +505,8 @@ export default function Index() {
     if (!nameSaved) return;
     if (!sites.length) return;
     if (autoSortedOnce) return;
-    if (screenMode !== "main") return;
     refreshDistances().finally(() => setAutoSortedOnce(true));
-  }, [nameSaved, sites.length, autoSortedOnce, screenMode]);
+  }, [nameSaved, sites.length, autoSortedOnce]);
 
   // real-time ticking
   useEffect(() => {
@@ -566,6 +516,7 @@ export default function Index() {
     const id = setInterval(() => {
       const nowServer = Date.now() + serverOffsetMs;
 
+      // Today ticks only when clocked in
       if (clockedIn) {
         const extra = Math.max(0, nowServer - serverNowBaseMs);
         setTodayMsLive(todayMsBase + extra);
@@ -592,8 +543,8 @@ export default function Index() {
     if (!siteId && data.sites?.[0]?.id) setSiteId(data.sites[0].id);
   }
 
-  async function initOnServer(did: string, nm: string, pos: string) {
-    const body = { action: "init", appKey: APP_KEY, deviceId: did, name: nm, position: pos, appVersion: APP_VERSION };
+  async function initOnServer(did: string, nm: string) {
+    const body = { action: "init", appKey: APP_KEY, deviceId: did, name: nm };
     const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -605,12 +556,7 @@ export default function Index() {
 
   function applyMe(data: MeResponse) {
     setEmployee(data.employee);
-    if (data.employee?.oshaExpiryISO) {
-      try {
-        const d = new Date(data.employee.oshaExpiryISO + "T00:00:00");
-        if (!isNaN(d.getTime())) setOshaExpiryDate(d);
-      } catch {}
-    }
+    if (data.employee?.oshaExpiryISO) setOshaExpiryISO(String(data.employee.oshaExpiryISO));
 
     const serverNowISO = String(data.serverNowISO || new Date().toISOString());
     const serverNowMs = Date.parse(serverNowISO);
@@ -625,16 +571,10 @@ export default function Index() {
     setCurrentSiteName(String((data as any).currentSiteName || ""));
 
     setTodayMsLive(Number(data.todayMs || 0));
-
-    // Check if server says update is required
-    if (data.updateRequired) {
-      setUpdateRequired(true);
-      setUpdateUrl(String(data.updateUrl || ""));
-    }
   }
 
   async function loadMe(did: string) {
-    const url = `${API_URL}?action=me&appKey=${encodeURIComponent(APP_KEY)}&deviceId=${encodeURIComponent(did)}&appVersion=${encodeURIComponent(APP_VERSION)}`;
+    const url = `${API_URL}?action=me&appKey=${encodeURIComponent(APP_KEY)}&deviceId=${encodeURIComponent(did)}`;
     const res = await fetch(url);
     const data: MeResponse = await res.json();
     if (!data?.ok) throw new Error(data?.error || "Me load failed");
@@ -671,52 +611,21 @@ export default function Index() {
   }
   const ready = gateReason() === "";
 
-  // ---- Registration: name + language + position + OSHA ----
-  async function submitRegistration() {
+  async function saveNameOnce() {
     const nm = name.trim();
     if (nm.length < 2) return;
-    if (!oshaPhoto) {
-      Alert.alert("OSHA", t("oshaNotSubmitted"));
-      return;
-    }
-
-    const expiryISO = fmtDate(oshaExpiryDate);
-    const pos = position.trim();
 
     setBusy(true);
     try {
       await sset(STORE.name, nm);
       await sset(STORE.lang, lang);
-      if (pos) await sset(STORE.position, pos);
-
-      // Init on server first
-      await initOnServer(deviceId, nm, pos);
-
-      // Then register OSHA
-      const body = {
-        action: "register_osha",
-        appKey: APP_KEY,
-        appVersion: APP_VERSION,
-        deviceId,
-        name: nm,
-        position: pos,
-        oshaExpiryISO: expiryISO,
-        oshaPhotoBase64: oshaPhoto.base64,
-        oshaPhotoMime: oshaPhoto.mime,
-      };
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data: MeResponse = await res.json();
-      if (!data?.ok) throw new Error(data?.error || "Registration failed");
-
-      setOshaPhoto(null);
-      applyMe(data);
       setNameSaved(true);
 
+      await initOnServer(deviceId, nm);
       await loadMe(deviceId);
+
+      await refreshDistances();
+      setAutoSortedOnce(true);
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
     } finally {
@@ -724,22 +633,18 @@ export default function Index() {
     }
   }
 
-  // ---- Re-upload OSHA (for pending/expired screens) ----
-  async function reuploadOsha() {
+  async function submitOsha() {
+    if (!isISODate(oshaExpiryISO)) return;
     if (!oshaPhoto) return;
-
-    const expiryISO = fmtDate(oshaExpiryDate);
 
     setBusy(true);
     try {
       const body = {
         action: "register_osha",
         appKey: APP_KEY,
-        appVersion: APP_VERSION,
         deviceId,
         name: name.trim(),
-        position: position.trim(),
-        oshaExpiryISO: expiryISO,
+        oshaExpiryISO: oshaExpiryISO.trim(),
         oshaPhotoBase64: oshaPhoto.base64,
         oshaPhotoMime: oshaPhoto.mime,
       };
@@ -750,9 +655,7 @@ export default function Index() {
       });
       const data: MeResponse = await res.json();
       if (!data?.ok) throw new Error(data?.error || "OSHA upload failed");
-
       setOshaPhoto(null);
-      setShowReupload(false);
       applyMe(data);
       await loadMe(deviceId);
       Alert.alert(t("success"), t("uploaded"));
@@ -774,7 +677,6 @@ export default function Index() {
       const body = {
         action: "attest",
         appKey: APP_KEY,
-        appVersion: APP_VERSION,
         deviceId,
         name: name.trim(),
         signature: sig,
@@ -799,6 +701,46 @@ export default function Index() {
       applyMe(data);
       await loadMe(deviceId);
       Alert.alert(t("success"), t("attDone"));
+    } catch (e: any) {
+      Alert.alert("Error", String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestOtherSite() {
+    const nm = otherSiteName.trim();
+    const rad = Number(otherRadiusM || 120);
+    if (!nm || !isFinite(rad) || rad <= 0) return;
+
+    setBusy(true);
+    try {
+      const current = await requestLocationOnce();
+      setLoc(current);
+
+      const body = {
+        action: "site_request",
+        appKey: APP_KEY,
+        deviceId,
+        name: name.trim(),
+        siteName: nm,
+        lat: current.latitude,
+        lon: current.longitude,
+        radiusM: rad,
+        device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
+      };
+
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data: MeResponse = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Site request failed");
+      Alert.alert(t("success"), "Sent");
+      applyMe(data);
+      await loadMe(deviceId);
+      setUseOther(true);
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
     } finally {
@@ -845,7 +787,6 @@ export default function Index() {
       const payload: any = {
         action: "event",
         appKey: APP_KEY,
-        appVersion: APP_VERSION,
         deviceId,
         name: name.trim(),
         type,
@@ -853,7 +794,7 @@ export default function Index() {
         device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
       };
 
-      if (selectedSite) {
+      if (!useOther && selectedSite) {
         payload.siteId = selectedSite.id;
 
         const d = haversineMeters(current.latitude, current.longitude, selectedSite.lat, selectedSite.lon);
@@ -864,9 +805,9 @@ export default function Index() {
           return;
         }
       } else {
-        Alert.alert("Error", "No site selected");
-        setBusy(false);
-        return;
+        const nm = otherSiteName.trim() || "Other site";
+        const rad = Number(otherRadiusM || 120);
+        payload.customSite = { name: nm, lat: current.latitude, lon: current.longitude, radiusM: rad };
       }
 
       if (type === "OUT") {
@@ -874,43 +815,27 @@ export default function Index() {
         payload.outPhotos = outPhotos.slice(0, MAX_OUT_PHOTOS).map((p) => ({ base64: p.base64, mime: p.mime }));
       }
 
-      // ---- Optimistic UI update ----
-      const nowMs = Date.now() + serverOffsetMs;
-      if (type === "IN") {
-        setClockedIn(true);
-        setOpenInISO(new Date(nowMs).toISOString());
-        setCurrentSiteName(selectedSite?.name || "");
-      } else {
-        setClockedIn(false);
-        setOpenInISO("");
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data: MeResponse = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Server rejected");
+
+      applyMe(data);
+      await loadMe(deviceId); // <-- force refresh so clock/site updates immediately
+
+      if (type === "OUT") {
         setOutPanel(false);
         setOutNote("");
         setOutPhotos([]);
       }
-      setBusy(false);
 
-      // ---- Fire request in background ----
-      fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-        .then((res) => res.json())
-        .then((data: MeResponse) => {
-          if (!data?.ok) {
-            // Revert optimistic update on error
-            Alert.alert("Error", data?.error || "Server rejected");
-            loadMe(deviceId).catch(() => {});
-            return;
-          }
-          applyMe(data);
-        })
-        .catch((e) => {
-          Alert.alert("Error", String(e?.message || e));
-          loadMe(deviceId).catch(() => {});
-        });
+      Alert.alert(t("success"), `${type} recorded.`);
     } catch (e: any) {
       Alert.alert("Error", String(e?.message || e));
+    } finally {
       setBusy(false);
     }
   }
@@ -923,11 +848,9 @@ export default function Index() {
         style: "destructive",
         onPress: async () => {
           await sdel(STORE.name);
-          // deviceId intentionally NOT deleted — keeps the same employee identity
+          await sdel(STORE.deviceId);
           await sdel(STORE.lang);
-          await sdel(STORE.position);
           setName("");
-          setPosition("");
           setNameSaved(false);
           setEditingName(false);
           setEmployee(null);
@@ -951,7 +874,6 @@ export default function Index() {
               const payload: any = {
                 action: "event",
                 appKey: APP_KEY,
-        appVersion: APP_VERSION,
                 deviceId,
                 name: name.trim(),
                 type: "OUT",
@@ -960,7 +882,7 @@ export default function Index() {
                 coords: { lat: 0, lon: 0, accuracyM: 0 },
                 device: { platform: Platform.OS, deviceTimeISO: new Date().toISOString() },
               };
-              if (selectedSite) {
+              if (!useOther && selectedSite) {
                 payload.siteId = selectedSite.id;
               }
               const res = await fetch(API_URL, {
@@ -984,55 +906,34 @@ export default function Index() {
     );
   }
 
+  const oshaState = !employee
+    ? "pending"
+    : employee.oshaExpired
+      ? "expired"
+      : employee.oshaApproved
+        ? "ok"
+        : "pending";
+
   const attState = !employee ? "pending" : employee.attestedToday ? "ok" : "needed";
 
+  const showOshaBlock = !employee || employee.oshaExpired || !employee.oshaApproved;
   const showAttestBlock = employee && !employee.attestedToday && !employee.oshaExpired && employee.oshaApproved;
-
-  // ---- Date picker handler ----
-  function onDateChange(_event: any, selectedDate?: Date) {
-    if (Platform.OS === "android") setShowDatePicker(false);
-    if (selectedDate) setOshaExpiryDate(selectedDate);
-  }
-
-  // ========================= UPDATE BANNER =========================
-  const UpdateBanner = () => {
-    if (!updateRequired) return null;
-    return (
-      <View style={styles.updateBanner}>
-        <Text style={styles.updateText}>{t("updateMsg")}</Text>
-        <TouchableOpacity
-          style={styles.updateBtn}
-          onPress={() => {
-            if (updateUrl) Linking.openURL(updateUrl);
-          }}
-        >
-          <Text style={styles.updateBtnText}>{t("updateBtn")}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  // ========================= SCREENS =========================
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.center, { backgroundColor: C.bg1 }]}>
+      <SafeAreaView style={[styles.center, { backgroundColor: "#FFFFFF" }]}>
         <ActivityIndicator />
         <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
       </SafeAreaView>
     );
   }
 
-  // ---- REGISTRATION SCREEN (name + lang + position + OSHA) ----
-  if (screenMode === "registration") {
-    const canSubmit = name.trim().length >= 2 && !!oshaPhoto;
-
+  if (!nameSaved) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: C.bg1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
         <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
         <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
-            <UpdateBanner />
             <View style={styles.brandHeaderOnboarding}>
               <Image source={LOGO} style={styles.logoBig} resizeMode="contain" />
             </View>
@@ -1043,14 +944,6 @@ export default function Index() {
 
               <Text style={styles.label}>{t("yourName")}</Text>
               <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Galileo Galilei" />
-
-              <Text style={styles.label}>{t("position")}</Text>
-              <TextInput
-                value={position}
-                onChangeText={setPosition}
-                style={styles.input}
-                placeholder={t("positionPh")}
-              />
 
               <Text style={styles.label}>{t("language")}</Text>
               <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
@@ -1073,38 +966,141 @@ export default function Index() {
                   </Text>
                 </TouchableOpacity>
               </View>
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, name.trim().length < 2 ? { opacity: 0.5 } : null]}
+                onPress={saveNameOnce}
+                disabled={busy || name.trim().length < 2}
+              >
+                <Text style={styles.primaryBtnText}>{t("continue")}</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* OSHA Card section */}
+            <TouchableOpacity
+            onPress={resetApp}
+            style={{ alignItems: "center", marginTop: 24, marginBottom: 4 }}
+          >
+            <Text style={{ fontSize: 12, color: C.muted, fontWeight: "700" }}>{t("resetBtn")}</Text>
+          </TouchableOpacity>
+          <Text style={styles.footer}>{t("footer")}</Text>
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
+      <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
+          <View style={styles.brandHeader}>
+            <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
+            <View style={{ flex: 1 }}>
+              {editingName ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <TextInput
+                    value={name}
+                    onChangeText={setName}
+                    style={[styles.input, { flex: 1, marginBottom: 0, paddingVertical: 6 }]}
+                    autoFocus
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    returnKeyType="done"
+                    onSubmitEditing={async () => {
+                      if (name.trim().length < 2) return;
+                      setBusy(true);
+                      try {
+                        await sset(STORE.name, name.trim());
+                        await initOnServer(deviceId, name.trim());
+                        await loadMe(deviceId);
+                        setEditingName(false);
+                      } catch (e: any) {
+                        Alert.alert("Error", String(e?.message || e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (name.trim().length < 2) return;
+                      setBusy(true);
+                      try {
+                        await sset(STORE.name, name.trim());
+                        await initOnServer(deviceId, name.trim());
+                        await loadMe(deviceId);
+                        setEditingName(false);
+                      } catch (e: any) {
+                        Alert.alert("Error", String(e?.message || e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    disabled={busy}
+                    style={[styles.pillBtn, { paddingHorizontal: 10 }]}
+                  >
+                    <Text style={styles.pillBtnText}>{t("changeNameSave")}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity onPress={() => setEditingName(true)}>
+                  <Text style={styles.userName}>{name}</Text>
+                </TouchableOpacity>
+              )}
+              <Text style={styles.mutedSmall}>
+                {ready ? t("statusReady") : `${t("statusBlocked")}: ${gateReason()}`}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.pillBtn}
+              onPress={async () => {
+                setBusy(true);
+                try {
+                  await loadMe(deviceId);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+            >
+              <Text style={styles.pillBtnText}>{t("refresh")}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.chipsRow}>
+            <StatusChip
+              label={t("osha")}
+              state={oshaState}
+              text={oshaState === "ok" ? t("ok") : oshaState === "expired" ? t("expired") : t("pending")}
+            />
+            <StatusChip
+              label={t("att")}
+              state={attState}
+              text={attState === "ok" ? t("done") : attState === "needed" ? t("needed") : t("pending")}
+            />
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+            <View style={styles.cardMini}>
+              <Text style={styles.miniLabel}>{t("todayTime")}</Text>
+              <Text style={styles.miniValue}>{fmtHhMm(todayMsLive)}</Text>
+            </View>
+
+            <View style={styles.cardMini}>
+              <Text style={styles.miniLabel}>{t("onSiteTime")}</Text>
+              <Text style={styles.mutedSmall}>{clockedIn ? (currentSiteName || "—") : "—"}</Text>
+              <Text style={styles.miniValue}>{clockedIn ? fmtHhMmSs(onSiteMsLive) : "—"}</Text>
+            </View>
+          </View>
+
+          {showOshaBlock ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{t("oshaTitle")}</Text>
               <Text style={styles.muted}>{t("oshaExplain")}</Text>
 
               <Text style={styles.label}>{t("expiry")}</Text>
-              <TouchableOpacity
-                style={[styles.input, { justifyContent: "center" }]}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={{ color: C.text, fontSize: 15 }}>{fmtDate(oshaExpiryDate)}</Text>
-              </TouchableOpacity>
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={oshaExpiryDate}
-                  mode="date"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  minimumDate={new Date()}
-                  onChange={onDateChange}
-                />
-              )}
-              {Platform.OS === "ios" && showDatePicker && (
-                <TouchableOpacity
-                  style={[styles.secondaryBtnWide, { marginTop: 6 }]}
-                  onPress={() => setShowDatePicker(false)}
-                >
-                  <Text style={styles.secondaryBtnText}>{t("done")}</Text>
-                </TouchableOpacity>
-              )}
+              <TextInput value={oshaExpiryISO} onChangeText={setOshaExpiryISO} style={styles.input} placeholder="YYYY-MM-DD" />
 
               <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                 <TouchableOpacity
@@ -1135,315 +1131,29 @@ export default function Index() {
                   <Image source={{ uri: oshaPhoto.previewUri }} style={styles.preview} />
                 </View>
               ) : null}
-            </View>
-
-            <TouchableOpacity
-              style={[styles.primaryBtn, !canSubmit ? { opacity: 0.5 } : null]}
-              onPress={submitRegistration}
-              disabled={busy || !canSubmit}
-            >
-              <Text style={styles.primaryBtnText}>{t("continue")}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={resetApp}
-              style={{ alignItems: "center", marginTop: 24, marginBottom: 4 }}
-            >
-              <Text style={{ fontSize: 12, color: C.muted, fontWeight: "700" }}>{t("resetBtn")}</Text>
-            </TouchableOpacity>
-            <Text style={styles.footer}>{t("footer")}</Text>
-          </ScrollView>
-
-          {busy ? (
-            <View style={styles.busyOverlay}>
-              <ActivityIndicator />
-              <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
-            </View>
-          ) : null}
-
-          <LinearGradient
-            colors={["rgba(247,249,255,1)", "rgba(247,249,255,0)"]}
-            style={styles.topFade}
-            pointerEvents="none"
-          />
-          <LinearGradient
-            colors={["rgba(247,249,255,0)", "rgba(247,249,255,1)"]}
-            style={styles.bottomFade}
-            pointerEvents="none"
-          />
-        </LinearGradient>
-      </SafeAreaView>
-    );
-  }
-
-  // ---- LOADING SCREEN (brief, while fetching employee) ----
-  if (screenMode === "loading") {
-    return (
-      <SafeAreaView style={[styles.center, { backgroundColor: C.bg1 }]}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
-        <TouchableOpacity
-          style={[styles.pillBtn, { marginTop: 20 }]}
-          onPress={async () => {
-            setBusy(true);
-            try { await loadMe(deviceId); } catch {}
-            setBusy(false);
-          }}
-        >
-          <Text style={styles.pillBtnText}>{t("refresh")}</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-  // ---- PENDING / BLOCKED SCREEN (OSHA not yet approved or expired) ----
-  if (screenMode === "pending" || screenMode === "blocked") {
-    const isExpired = oshaExpired;
-    const notSubmitted = !oshaSubmitted;
-
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: C.bg1 }}>
-        <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
-        <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
-            <UpdateBanner />
-            <View style={styles.brandHeaderOnboarding}>
-              <Image source={LOGO} style={styles.logoBig} resizeMode="contain" />
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.h1}>
-                {isExpired ? t("oshaExpiredTitle") : notSubmitted ? t("oshaTitle") : t("pendingTitle")}
-              </Text>
-              <Text style={styles.muted}>
-                {isExpired ? t("oshaExpiredExplain") : notSubmitted ? t("oshaNotSubmitted") : t("pendingExplain")}
-              </Text>
-
-              {employee ? (
-                <View style={{ marginTop: 10 }}>
-                  <Text style={styles.mutedSmall}>{employee.name} ({employee.code})</Text>
-                  {employee.oshaExpiryISO ? (
-                    <Text style={[styles.mutedSmall, isExpired ? { color: C.danger } : null]}>
-                      OSHA: {employee.oshaExpiryISO}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
 
               <TouchableOpacity
-                style={[styles.primaryBtn, { marginTop: 14 }]}
-                onPress={async () => {
-                  setBusy(true);
-                  try { await loadMe(deviceId); } catch {}
-                  setBusy(false);
-                }}
-                disabled={busy}
+                style={[
+                  styles.primaryBtn,
+                  (!isISODate(oshaExpiryISO) || !oshaPhoto) ? { opacity: 0.5 } : null,
+                ]}
+                onPress={submitOsha}
+                disabled={busy || !isISODate(oshaExpiryISO) || !oshaPhoto}
               >
-                <Text style={styles.primaryBtnText}>{t("refresh")}</Text>
+                <Text style={styles.primaryBtnText}>{t("uploadOSHA")}</Text>
               </TouchableOpacity>
 
-              {/* Re-upload / upload OSHA */}
-              {(isExpired || notSubmitted || showReupload) ? (
-                <View style={{ marginTop: 16 }}>
-                  <Text style={styles.label}>{t("expiry")}</Text>
-                  <TouchableOpacity
-                    style={[styles.input, { justifyContent: "center" }]}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <Text style={{ color: C.text, fontSize: 15 }}>{fmtDate(oshaExpiryDate)}</Text>
-                  </TouchableOpacity>
-
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={oshaExpiryDate}
-                      mode="date"
-                      display={Platform.OS === "ios" ? "spinner" : "default"}
-                      minimumDate={new Date()}
-                      onChange={onDateChange}
-                    />
-                  )}
-                  {Platform.OS === "ios" && showDatePicker && (
-                    <TouchableOpacity
-                      style={[styles.secondaryBtnWide, { marginTop: 6 }]}
-                      onPress={() => setShowDatePicker(false)}
-                    >
-                      <Text style={styles.secondaryBtnText}>{t("done")}</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={styles.secondaryBtn}
-                      onPress={async () => {
-                        const p = await takeAndCompressPhoto(t);
-                        if (p) setOshaPhoto(p);
-                      }}
-                      disabled={busy}
-                    >
-                      <Text style={styles.secondaryBtnText}>{t("takePhoto")}</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.secondaryBtn}
-                      onPress={async () => {
-                        const p = await pickFromGallery(t);
-                        if (p) setOshaPhoto(p);
-                      }}
-                      disabled={busy}
-                    >
-                      <Text style={styles.secondaryBtnText}>Gallery</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {oshaPhoto ? (
-                    <View style={{ marginTop: 10 }}>
-                      <Image source={{ uri: oshaPhoto.previewUri }} style={styles.preview} />
-                    </View>
-                  ) : null}
-
-                  <TouchableOpacity
-                    style={[styles.primaryBtn, !oshaPhoto ? { opacity: 0.5 } : null]}
-                    onPress={reuploadOsha}
-                    disabled={busy || !oshaPhoto}
-                  >
-                    <Text style={styles.primaryBtnText}>{t("uploadOSHA")}</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={[styles.secondaryBtnWide, { marginTop: 10 }]}
-                  onPress={() => setShowReupload(true)}
-                  disabled={busy}
-                >
-                  <Text style={styles.secondaryBtnText}>{t("reuploadOsha")}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <TouchableOpacity
-              onPress={resetApp}
-              style={{ alignItems: "center", marginTop: 24, marginBottom: 4 }}
-            >
-              <Text style={{ fontSize: 12, color: C.muted, fontWeight: "700" }}>{t("resetBtn")}</Text>
-            </TouchableOpacity>
-            <Text style={styles.footer}>{t("footer")}</Text>
-          </ScrollView>
-
-          {busy ? (
-            <View style={styles.busyOverlay}>
-              <ActivityIndicator />
-              <Text style={{ marginTop: 10, color: C.muted }}>{t("working")}</Text>
-            </View>
-          ) : null}
-
-          <LinearGradient
-            colors={["rgba(247,249,255,1)", "rgba(247,249,255,0)"]}
-            style={styles.topFade}
-            pointerEvents="none"
-          />
-          <LinearGradient
-            colors={["rgba(247,249,255,0)", "rgba(247,249,255,1)"]}
-            style={styles.bottomFade}
-            pointerEvents="none"
-          />
-        </LinearGradient>
-      </SafeAreaView>
-    );
-  }
-
-  // ========================= MAIN APP SCREEN =========================
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg1 }}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg1} translucent={false} />
-      <LinearGradient colors={[C.bg1, C.bg2]} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
-          <UpdateBanner />
-          <View style={styles.brandHeader}>
-            <Image source={LOGO} style={styles.logoSmall} resizeMode="contain" />
-            <View style={{ flex: 1 }}>
-              {editingName ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <TextInput
-                    value={name}
-                    onChangeText={setName}
-                    style={[styles.input, { flex: 1, marginBottom: 0, paddingVertical: 6 }]}
-                    autoFocus
-                    autoCapitalize="words"
-                    autoCorrect={false}
-                    returnKeyType="done"
-                    onSubmitEditing={async () => {
-                      if (name.trim().length < 2) return;
-                      setBusy(true);
-                      try {
-                        await sset(STORE.name, name.trim());
-                        await initOnServer(deviceId, name.trim(), position.trim());
-                        await loadMe(deviceId);
-                        setEditingName(false);
-                      } catch (e: any) {
-                        Alert.alert("Error", String(e?.message || e));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  />
-                  <TouchableOpacity
-                    onPress={async () => {
-                      if (name.trim().length < 2) return;
-                      setBusy(true);
-                      try {
-                        await sset(STORE.name, name.trim());
-                        await initOnServer(deviceId, name.trim(), position.trim());
-                        await loadMe(deviceId);
-                        setEditingName(false);
-                      } catch (e: any) {
-                        Alert.alert("Error", String(e?.message || e));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                    disabled={busy}
-                    style={[styles.pillBtn, { paddingHorizontal: 10 }]}
-                  >
-                    <Text style={styles.pillBtnText}>{t("changeNameSave")}</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity onPress={() => setEditingName(true)}>
-                  <Text style={styles.userName}>{name}</Text>
-                </TouchableOpacity>
-              )}
-              {employee?.position ? (
-                <Text style={styles.mutedSmall}>{employee.position}</Text>
+              {employee && !employee.oshaApproved && !employee.oshaExpired ? (
+                <Text style={[styles.mutedSmall, { marginTop: 8 }]}>{t("uploaded")}</Text>
               ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.pillBtn}
-              onPress={async () => {
-                setBusy(true);
-                try {
-                  await Promise.all([loadSites(), loadMe(deviceId)]);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              disabled={busy}
-            >
-              <Text style={styles.pillBtnText}>{t("refresh")}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Timer */}
-          <View style={styles.timerCard}>
-            <Text style={styles.timerValue}>{clockedIn ? fmtHhMmSs(todayMsLive) : fmtHhMm(todayMsLive)}</Text>
-            {clockedIn && currentSiteName ? (
-              <Text style={styles.timerSite}>{currentSiteName}</Text>
-            ) : null}
-          </View>
+          ) : null}
 
           {showAttestBlock ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{t("attestTitle")}</Text>
 
+              {/* Video & Rules links */}
               <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
                 <TouchableOpacity
                   style={[styles.linkBtn, { flex: 1 }]}
@@ -1505,11 +1215,15 @@ export default function Index() {
               disabled={busy}
             >
               <Text style={styles.siteTitle}>
-                {selectedSite ? selectedSite.name : t("site")}
+                {useOther ? t("otherSite") : selectedSite ? selectedSite.name : t("site")}
               </Text>
               <Text style={styles.mutedSmall}>
-                {selectedSite ? fmtDist(distMap[selectedSite.id] ?? 0) : ""}
+                {useOther ? t("otherSiteHint") : selectedSite ? fmtDist(distMap[selectedSite.id] ?? 0) : ""}
               </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryBtnWide} onPress={loadSites} disabled={busy}>
+              <Text style={styles.secondaryBtnText}>{t("reloadSites")}</Text>
             </TouchableOpacity>
 
             {sitePickerOpen ? (
@@ -1522,9 +1236,10 @@ export default function Index() {
                     key={s.id}
                     style={[
                       styles.siteItem,
-                      s.id === siteId ? styles.siteItemOn : null,
+                      s.id === siteId && !useOther ? styles.siteItemOn : null,
                     ]}
                     onPress={() => {
+                      setUseOther(false);
                       setSiteId(s.id);
                       setSitePickerOpen(false);
                     }}
@@ -1535,6 +1250,31 @@ export default function Index() {
                   </TouchableOpacity>
                 ))}
 
+                <TouchableOpacity
+                  style={[styles.siteItem, useOther ? styles.siteItemOn : null]}
+                  onPress={() => {
+                    setUseOther(true);
+                    setSitePickerOpen(false);
+                  }}
+                  disabled={busy}
+                >
+                  <Text style={styles.siteItemText}>{t("otherSite")}</Text>
+                  <Text style={styles.mutedSmall}>{t("otherSiteHint")}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {useOther ? (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.label}>{t("newSiteName")}</Text>
+                <TextInput value={otherSiteName} onChangeText={setOtherSiteName} style={styles.input} placeholder="New project" />
+
+                <Text style={styles.label}>{t("radius")}</Text>
+                <TextInput value={otherRadiusM} onChangeText={setOtherRadiusM} style={styles.input} keyboardType="numeric" />
+
+                <TouchableOpacity style={styles.secondaryBtnWide} onPress={requestOtherSite} disabled={busy}>
+                  <Text style={styles.secondaryBtnText}>{t("sendRequest")}</Text>
+                </TouchableOpacity>
               </View>
             ) : null}
           </View>
@@ -1629,13 +1369,15 @@ export default function Index() {
           ) : null}
         </ScrollView>
 
+        {/* Top fade */}
         <LinearGradient
           colors={["rgba(247,249,255,1)", "rgba(247,249,255,0)"]}
           style={styles.topFade}
           pointerEvents="none"
         />
+        {/* Bottom fade */}
         <LinearGradient
-          colors={["rgba(247,249,255,0)", "rgba(247,249,255,1)"]}
+          colors={["rgba(255,255,255,0)", "rgba(255,255,255,1)"]}
           style={styles.bottomFade}
           pointerEvents="none"
         />
@@ -1716,64 +1458,6 @@ const styles = StyleSheet.create({
   },
   miniLabel: { color: C.muted, fontWeight: "800" },
   miniValue: { color: C.navy, fontWeight: "900", fontSize: 16, marginTop: 4 },
-
-  timerCard: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    marginTop: 10,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  timerValue: {
-    fontSize: 44,
-    fontWeight: "900",
-    color: C.navy,
-    letterSpacing: 2,
-    fontVariant: ["tabular-nums"],
-  },
-  timerSite: {
-    marginTop: 6,
-    fontSize: 13,
-    fontWeight: "800",
-    color: C.muted,
-  },
-
-  updateBanner: {
-    backgroundColor: "rgba(245,165,36,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(245,165,36,0.4)",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    alignItems: "center",
-  },
-  updateText: {
-    color: C.text,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center",
-    lineHeight: 18,
-  },
-  updateBtn: {
-    marginTop: 10,
-    backgroundColor: C.warn,
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-  },
-  updateBtnText: {
-    color: "#fff",
-    fontWeight: "900",
-    fontSize: 14,
-  },
 
   label: { fontSize: 12, color: C.muted, marginTop: 10, marginBottom: 6 },
   input: {
@@ -1970,6 +1654,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(247,249,255,0.65)",
+    backgroundColor: "rgba(255,255,255,0.65)",
   },
 });

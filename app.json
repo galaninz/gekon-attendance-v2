@@ -2,7 +2,7 @@
   "expo": {
     "name": "GEKON Attendance 2",
     "slug": "gekon-attendance-v2",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "scheme": "gekonattendancev2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -49,7 +49,8 @@
             "deploymentTarget": "16.0"
           }
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "router": {},
